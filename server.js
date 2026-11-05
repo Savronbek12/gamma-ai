@@ -49,8 +49,11 @@ function subjectInstruction(subjectId) {
 // ---------------------------------------------------------------------------
 // Oddiy himoya: so'rovlar soni va hajmini cheklash
 // ---------------------------------------------------------------------------
-const MAX_MESSAGES = 40;
-const MAX_CHARS_PER_MESSAGE = 12000;
+const MAX_MESSAGES = 200;
+const MAX_CHARS_PER_MESSAGE = 12000; // faqat foydalanuvchi xabari uchun
+// Modelga yuboriladigan suhbat tarixining umumiy hajmi (belgilarda).
+// Groq'ning bepul tarifida daqiqasiga token chegarasi past, shuning uchun eski xabarlar qisqartiriladi.
+const HISTORY_CHAR_BUDGET = Number(process.env.HISTORY_CHAR_BUDGET) || 16000;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_PER_MINUTE) || 15;
 const hits = new Map();
@@ -77,10 +80,24 @@ function validateMessages(messages) {
     const expected = i % 2 === 0 ? "user" : "assistant";
     if (!m || m.role !== expected || typeof m.content !== "string") return "Xabar formati noto'g'ri.";
     if (!m.content.trim()) return "Bo'sh xabar yuborib bo'lmaydi.";
-    if (m.content.length > MAX_CHARS_PER_MESSAGE) return "Xabar juda uzun (12 000 belgidan oshmasin).";
+    if (m.role === "user" && m.content.length > MAX_CHARS_PER_MESSAGE) return "Xabar juda uzun (12 000 belgidan oshmasin).";
   }
   if (messages.at(-1).role !== "user") return "Oxirgi xabar foydalanuvchidan bo'lishi kerak.";
   return null;
+}
+
+// Oxirgi savol doim qoladi; undan oldingi xabarlar byudjetga sig'gunicha qo'shiladi.
+// Natija har doim foydalanuvchi xabari bilan boshlanadi.
+function trimHistory(messages) {
+  const kept = [messages.at(-1)];
+  let total = kept[0].content.length;
+  for (let i = messages.length - 3; i >= 0; i -= 2) {
+    const pairSize = messages[i].content.length + messages[i + 1].content.length;
+    if (total + pairSize > HISTORY_CHAR_BUDGET) break;
+    kept.unshift(messages[i], messages[i + 1]);
+    total += pairSize;
+  }
+  return kept;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +139,7 @@ app.post("/api/chat", async (req, res) => {
     send("status", { state: "thinking" });
     const stop = await streamAnswer({
       systemParts: [BASE_SYSTEM, subjectInstruction(subject)],
-      messages,
+      messages: trimHistory(messages),
       signal: abort.signal,
       onText: (text) => {
         if (!closed) send("delta", { text });

@@ -22,29 +22,52 @@ function load() {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
     if (raw && Array.isArray(raw.messages)) {
       state.subject = raw.subject || null;
-      state.messages = raw.messages.filter((m) => m && typeof m.content === "string");
+      // Faqat to'g'ri ketma-ketlikdagi (savol, javob, savol, javob...) xabarlarni qoldiramiz
+      const clean = [];
+      for (const m of raw.messages) {
+        if (!m || typeof m.content !== "string" || !m.content.trim()) continue;
+        const expected = clean.length % 2 === 0 ? "user" : "assistant";
+        if (m.role === expected) clean.push({ role: m.role, content: m.content });
+      }
       // Javobsiz qolgan oxirgi savolni olib tashlaymiz
-      if (state.messages.at(-1)?.role === "user") state.messages.pop();
+      if (clean.at(-1)?.role === "user") clean.pop();
+      state.messages = clean;
     }
   } catch {}
 }
 
 // ---------- Markdown + LaTeX ----------
+// Belgilash uchun Unicode "shaxsiy foydalanish" belgilari (matnda uchramaydi, markdown ularni o'zgartirmaydi)
+const PH_OPEN = "";
+const PH_CLOSE = "";
+
 function renderMarkdown(text) {
+  // 1) Kod bloklarini vaqtincha ajratamiz, ichidagi $ belgisi formula deb hisoblanmasin
+  const code = [];
+  const stashCode = (s) => {
+    code.push(s);
+    return `${PH_OPEN}CODE${code.length - 1}${PH_CLOSE}`;
+  };
+  let src = text
+    .replace(/(^|\n)(```|~~~)[^\n]*\n[\s\S]*?(?:\n\2[^\n]*(?=\n|$)|$)/g, (m) => stashCode(m))
+    .replace(/`[^`\n]+`/g, (m) => stashCode(m));
+
+  // 2) Formulalarni markdown'dan himoyalash uchun ajratamiz
   const math = [];
   const stash = (tex, display) => {
     math.push({ tex, display });
-    return `\u0000MATH${math.length - 1}\u0000`;
+    return `${PH_OPEN}MATH${math.length - 1}${PH_CLOSE}`;
   };
-  // Formulalarni markdown'dan himoyalash uchun vaqtincha ajratib olamiz
-  let src = text
+  src = src
     .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => stash(t, true))
     .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => stash(t, true))
     .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => stash(t, false))
     .replace(/(^|[^\\$])\$([^\s$](?:[^$\n]*?[^\s$])?)\$(?!\d)/g, (_, pre, t) => pre + stash(t, false));
 
+  // 3) Kodni qaytaramiz va markdown'ni HTML'ga aylantiramiz
+  src = src.replace(new RegExp(`${PH_OPEN}CODE(\\d+)${PH_CLOSE}`, "g"), (_, i) => code[Number(i)]);
   let html = DOMPurify.sanitize(marked.parse(src, { gfm: true, breaks: false }));
-  html = html.replace(/\u0000MATH(\d+)\u0000/g, (_, i) => {
+  html = html.replace(new RegExp(`${PH_OPEN}MATH(\\d+)${PH_CLOSE}`, "g"), (_, i) => {
     const { tex, display } = math[Number(i)];
     try {
       return katex.renderToString(tex, { displayMode: display, throwOnError: false, output: "html" });
@@ -152,6 +175,8 @@ async function send(text) {
   autosize();
 
   state.messages.push({ role: "user", content: text });
+  // Shu suhbatni eslab qolamiz: javob kelguncha "Yangi suhbat" bosilsa, javob yangi suhbatga tushmasin
+  const convo = state.messages;
   save();
   addMessageEl("user", text);
   const bubble = addMessageEl("assistant", "");
@@ -209,6 +234,14 @@ async function send(text) {
     if (err.name !== "AbortError") errorText = err.message || "Tarmoq xatosi.";
   }
 
+  busy = false;
+  controller = null;
+  if (state.messages !== convo) {
+    // Foydalanuvchi yangi suhbat boshladi — eski javobni tashlab yuboramiz
+    sendBtn.disabled = !inputEl.value.trim();
+    return;
+  }
+
   if (answer) {
     let html = renderMarkdown(answer);
     if (truncated) html += '<p class="note">Javob uzunlik chegarasiga yetdi. Davom ettirish uchun «Davom eting» deb yozing.</p>';
@@ -222,8 +255,6 @@ async function send(text) {
   }
   save();
   scrollDown();
-  busy = false;
-  controller = null;
   sendBtn.disabled = !inputEl.value.trim();
 }
 

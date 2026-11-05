@@ -66,7 +66,8 @@ async function streamGroq({ systemParts, messages, signal, onText }) {
     {
       model: MODEL,
       stream: true,
-      max_completion_tokens: 8000,
+      // Fikrlash + javob uchun chegara. Groq bepul tarifida token limiti past bo'lgani uchun o'rtacha qiymat.
+      max_completion_tokens: Number(process.env.MAX_OUTPUT_TOKENS) || 6000,
       reasoning_effort: "medium",
       reasoning_format: "hidden", // fikrlash jarayoni foydalanuvchiga ko'rsatilmaydi
       messages: [
