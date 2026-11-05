@@ -1,19 +1,24 @@
 // Sun'iy intellekt provayderlari. AI_PROVIDER muhit o'zgaruvchisi bilan tanlanadi:
-//   gemini (standart, bepul tarif)  — GEMINI_API_KEY kerak
-//   claude                          — ANTHROPIC_API_KEY kerak
+//   groq   (standart, bepul tarif)  — GROQ_API_KEY kerak
+//   gemini (bepul tarif)            — GEMINI_API_KEY kerak
+//   claude (pullik)                 — ANTHROPIC_API_KEY kerak
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI, ApiError } from "@google/genai";
+import Groq from "groq-sdk";
 
-export const PROVIDER = (process.env.AI_PROVIDER || "gemini").toLowerCase();
+export const PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
 
-const DEFAULT_MODELS = { gemini: "gemini-3.8-flash", claude: "claude-opus-5-5" };
+const DEFAULT_MODELS = { groq: "openai/gpt-oss-120b", gemini: "gemini-3.8-flash", claude: "claude-opus-5-5" };
 export const MODEL = process.env.GAMMA_MODEL || DEFAULT_MODELS[PROVIDER];
 
 if (!DEFAULT_MODELS[PROVIDER]) {
-  throw new Error(`Noma'lum AI_PROVIDER: "${PROVIDER}". "gemini" yoki "claude" bo'lishi kerak.`);
+  throw new Error(`Noma'lum AI_PROVIDER: "${PROVIDER}". "groq", "gemini" yoki "claude" bo'lishi kerak.`);
 }
 
 export function missingKeyWarning() {
+  if (PROVIDER === "groq" && !process.env.GROQ_API_KEY) {
+    return "DIQQAT: GROQ_API_KEY ko'rsatilmagan. Kalitni https://console.groq.com/keys dan oling.";
+  }
   if (PROVIDER === "gemini" && !process.env.GEMINI_API_KEY) {
     return "DIQQAT: GEMINI_API_KEY ko'rsatilmagan. Kalitni https://aistudio.google.com/apikey dan oling.";
   }
@@ -28,8 +33,14 @@ export function friendlyError(err) {
   const status = err?.status;
   if (status === 429) return "Hozir so'rovlar juda ko'p. Iltimos, bir daqiqadan so'ng qayta urinib ko'ring.";
   if (status === 401 || status === 403) return "Server sozlanmagan: API kaliti noto'g'ri yoki ko'rsatilmagan.";
-  if (err instanceof Anthropic.APIConnectionError) return "Sun'iy intellekt xizmatiga ulanib bo'lmadi.";
-  if (!(err instanceof ApiError) && !(err instanceof Anthropic.APIError) && /api key|apiKey|credentials/i.test(String(err?.message))) {
+  if (err instanceof Anthropic.APIConnectionError || err instanceof Groq.APIConnectionError) {
+    return "Sun'iy intellekt xizmatiga ulanib bo'lmadi.";
+  }
+  if (status === 413 || /too large|context length|maximum context/i.test(String(err?.message))) {
+    return "Suhbat juda uzun bo'lib ketdi. Iltimos, yangi suhbat boshlang.";
+  }
+  const isApiError = err instanceof ApiError || err instanceof Anthropic.APIError || err instanceof Groq.APIError;
+  if (!isApiError && /api key|apiKey|API_KEY|credentials/i.test(String(err?.message))) {
     return "Server sozlanmagan: API kaliti ko'rsatilmagan.";
   }
   return "Serverda xatolik yuz berdi. Iltimos, birozdan so'ng qayta urinib ko'ring.";
@@ -39,13 +50,40 @@ export function friendlyError(err) {
 // Yagona interfeys: javob matnini bo'laklab onText() ga beradi va
 // tugash sababini qaytaradi: "end" | "max_tokens" | "refusal"
 // ---------------------------------------------------------------------------
+let groq = null;
 let gemini = null;
 let claude = null;
 
-export async function streamAnswer({ systemParts, messages, signal, onText }) {
-  return PROVIDER === "claude"
-    ? streamClaude({ systemParts, messages, signal, onText })
-    : streamGemini({ systemParts, messages, signal, onText });
+export async function streamAnswer(args) {
+  if (PROVIDER === "claude") return streamClaude(args);
+  if (PROVIDER === "gemini") return streamGemini(args);
+  return streamGroq(args);
+}
+
+async function streamGroq({ systemParts, messages, signal, onText }) {
+  groq ??= new Groq(); // GROQ_API_KEY muhit o'zgaruvchisidan olinadi
+  const stream = await groq.chat.completions.create(
+    {
+      model: MODEL,
+      stream: true,
+      max_completion_tokens: 8000,
+      reasoning_effort: "medium",
+      reasoning_format: "hidden", // fikrlash jarayoni foydalanuvchiga ko'rsatilmaydi
+      messages: [
+        { role: "system", content: systemParts.join("\n\n") },
+        ...messages.map((m) => ({ role: m.role, content: m.content })),
+      ],
+    },
+    { signal },
+  );
+  let finish = null;
+  for await (const chunk of stream) {
+    const choice = chunk.choices?.[0];
+    const text = choice?.delta?.content;
+    if (text) onText(text);
+    if (choice?.finish_reason) finish = choice.finish_reason;
+  }
+  return finish === "length" ? "max_tokens" : "end";
 }
 
 async function streamGemini({ systemParts, messages, signal, onText }) {

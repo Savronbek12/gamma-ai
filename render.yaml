@@ -12,8 +12,8 @@ services:
       - key: NODE_VERSION
         value: "22"
       - key: AI_PROVIDER
-        value: gemini
-      - key: GEMINI_API_KEY
+        value: groq
+      - key: GROQ_API_KEY
         sync: false   # Render panelida qo'lda kiritiladi (maxfiy)
       - key: RATE_LIMIT_PER_MINUTE
         value: "15"
