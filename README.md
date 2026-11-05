@@ -1,5 +1,7 @@
 # Gamma AI — Gamma-AI.uz
 
+> Suhbatlashadigan va fanlar bo'yicha mutaxassis ustoz.
+
 30 ta fan bo'yicha professor darajasidagi, rasmiy uslubda muloqot qiladigan sun'iy intellekt sayti.
 Asosiy model: **Claude Opus 5.5** (Anthropic).
 
