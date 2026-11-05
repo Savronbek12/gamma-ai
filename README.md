@@ -3,7 +3,7 @@
 > Suhbatlashadigan va fanlar bo'yicha mutaxassis ustoz.
 
 30 ta fan bo'yicha professor darajasidagi, rasmiy uslubda muloqot qiladigan sun'iy intellekt sayti.
-Asosiy model: **Claude Opus 5.5** (Anthropic).
+Sun'iy intellekt: **Google Gemini** (bepul tarif, standart) yoki **Claude** (Anthropic, pullik) — `AI_PROVIDER` sozlamasi bilan tanlanadi.
 
 ## Imkoniyatlar
 - 30 ta fan (matematika, fizika, kimyo, tarix, huquq, tibbiyot, iqtisodiyot va boshqalar) — chap paneldan tanlanadi
@@ -14,8 +14,8 @@ Asosiy model: **Claude Opus 5.5** (Anthropic).
 - Daqiqasiga so'rovlar cheklovi (suiiste'moldan himoya)
 
 ## 1. Kompyuterda ishga tushirish
-1. https://console.anthropic.com saytida ro'yxatdan o'ting va **API kalit** oling (to'lov kartasi ulanadi).
-2. `.env.example` faylini `.env` nomi bilan nusxalang va `ANTHROPIC_API_KEY=` qatoriga kalitni yozing.
+1. https://aistudio.google.com/apikey saytida Google akkauntingiz orqali bepul **Gemini API kalit** oling (**Create API key**).
+2. `.env.example` faylini `.env` nomi bilan nusxalang va `GEMINI_API_KEY=` qatoriga kalitni yozing.
 3. Terminalda:
    ```
    npm install
@@ -28,7 +28,7 @@ Asosiy model: **Claude Opus 5.5** (Anthropic).
 ## 2. Internetga chiqarish (hosting)
 Node.js qo'llab-quvvatlaydigan istalgan server mos keladi:
 - **VPS** (masalan, O'zbekistondagi ahost.uz, uzhost.uz yoki xorijiy DigitalOcean/Hetzner): Ubuntu o'rnatib, Node.js 22+, `npm install`, so'ng `pm2 start server.js --node-args="--env-file=.env"` bilan doimiy ishlatiladi. Oldiga Nginx (reverse proxy) va Let's Encrypt (HTTPS) qo'yiladi.
-- **Render.com / Railway.app**: loyihani GitHub'ga yuklab, "Web Service" yarating, `npm start` buyrug'ini va `ANTHROPIC_API_KEY` muhit o'zgaruvchisini kiriting.
+- **Render.com / Railway.app**: loyihani GitHub'ga yuklab, "Web Service" yarating, `npm start` buyrug'ini va `GEMINI_API_KEY` muhit o'zgaruvchisini kiriting.
 
 Nginx uchun streaming ishlashi uchun muhim sozlama:
 ```
@@ -53,4 +53,4 @@ location / {
 ## Sozlash
 - Fanlar ro'yxati: `subjects.js`
 - Gamma AI xulq-atvori va uslubi (tizim ko'rsatmasi): `server.js` ichidagi `BASE_SYSTEM`
-- Model: `.env` faylida `GAMMA_MODEL`
+- Provayder va model: `.env` faylida `AI_PROVIDER` (gemini / claude) va `GAMMA_MODEL`. Claude uchun `ANTHROPIC_API_KEY` kerak.

@@ -1,0 +1,108 @@
+// Sun'iy intellekt provayderlari. AI_PROVIDER muhit o'zgaruvchisi bilan tanlanadi:
+//   gemini (standart, bepul tarif)  — GEMINI_API_KEY kerak
+//   claude                          — ANTHROPIC_API_KEY kerak
+import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, ApiError } from "@google/genai";
+
+export const PROVIDER = (process.env.AI_PROVIDER || "gemini").toLowerCase();
+
+const DEFAULT_MODELS = { gemini: "gemini-3.8-flash", claude: "claude-opus-5-5" };
+export const MODEL = process.env.GAMMA_MODEL || DEFAULT_MODELS[PROVIDER];
+
+if (!DEFAULT_MODELS[PROVIDER]) {
+  throw new Error(`Noma'lum AI_PROVIDER: "${PROVIDER}". "gemini" yoki "claude" bo'lishi kerak.`);
+}
+
+export function missingKeyWarning() {
+  if (PROVIDER === "gemini" && !process.env.GEMINI_API_KEY) {
+    return "DIQQAT: GEMINI_API_KEY ko'rsatilmagan. Kalitni https://aistudio.google.com/apikey dan oling.";
+  }
+  if (PROVIDER === "claude" && !process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
+    return "DIQQAT: ANTHROPIC_API_KEY ko'rsatilmagan.";
+  }
+  return null;
+}
+
+// Xatoni foydalanuvchiga tushunarli o'zbekcha matnga aylantiradi
+export function friendlyError(err) {
+  const status = err?.status;
+  if (status === 429) return "Hozir so'rovlar juda ko'p. Iltimos, bir daqiqadan so'ng qayta urinib ko'ring.";
+  if (status === 401 || status === 403) return "Server sozlanmagan: API kaliti noto'g'ri yoki ko'rsatilmagan.";
+  if (err instanceof Anthropic.APIConnectionError) return "Sun'iy intellekt xizmatiga ulanib bo'lmadi.";
+  if (!(err instanceof ApiError) && !(err instanceof Anthropic.APIError) && /api key|apiKey|credentials/i.test(String(err?.message))) {
+    return "Server sozlanmagan: API kaliti ko'rsatilmagan.";
+  }
+  return "Serverda xatolik yuz berdi. Iltimos, birozdan so'ng qayta urinib ko'ring.";
+}
+
+// ---------------------------------------------------------------------------
+// Yagona interfeys: javob matnini bo'laklab onText() ga beradi va
+// tugash sababini qaytaradi: "end" | "max_tokens" | "refusal"
+// ---------------------------------------------------------------------------
+let gemini = null;
+let claude = null;
+
+export async function streamAnswer({ systemParts, messages, signal, onText }) {
+  return PROVIDER === "claude"
+    ? streamClaude({ systemParts, messages, signal, onText })
+    : streamGemini({ systemParts, messages, signal, onText });
+}
+
+async function streamGemini({ systemParts, messages, signal, onText }) {
+  gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const stream = await gemini.models.generateContentStream({
+    model: MODEL,
+    contents: messages.map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    })),
+    config: {
+      systemInstruction: systemParts.join("\n\n"),
+      maxOutputTokens: 16000,
+      abortSignal: signal,
+    },
+  });
+
+  let finish = null;
+  let blocked = false;
+  for await (const chunk of stream) {
+    if (chunk.promptFeedback?.blockReason) blocked = true;
+    const text = chunk.text;
+    if (text) onText(text);
+    const reason = chunk.candidates?.[0]?.finishReason;
+    if (reason) finish = reason;
+  }
+  if (blocked || ["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII"].includes(finish)) return "refusal";
+  if (finish === "MAX_TOKENS") return "max_tokens";
+  return "end";
+}
+
+async function streamClaude({ systemParts, messages, signal, onText }) {
+  claude ??= new Anthropic();
+  const [base, ...rest] = systemParts;
+  const stream = claude.beta.messages.stream(
+    {
+      model: MODEL,
+      max_tokens: 32000,
+      thinking: { type: "adaptive" },
+      output_config: { effort: "high" },
+      // Xavfsizlik filtri rad etsa, Anthropic tavsiya qilgan modelda qayta urinadi
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      cache_control: { type: "ephemeral" },
+      system: [
+        { type: "text", text: base, cache_control: { type: "ephemeral" } },
+        ...rest.map((text) => ({ type: "text", text })),
+      ],
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    },
+    { signal },
+  );
+  for await (const event of stream) {
+    if (event.type === "content_block_delta" && event.delta.type === "text_delta") onText(event.delta.text);
+  }
+  const final = await stream.finalMessage();
+  if (final.stop_reason === "refusal") return "refusal";
+  if (final.stop_reason === "max_tokens") return "max_tokens";
+  return "end";
+}

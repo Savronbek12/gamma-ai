@@ -11,10 +11,9 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
-      - key: ANTHROPIC_API_KEY
+      - key: AI_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
         sync: false   # Render panelida qo'lda kiritiladi (maxfiy)
       - key: RATE_LIMIT_PER_MINUTE
         value: "15"
-    domains:
-      - gamma-ai.uz
-      - www.gamma-ai.uz

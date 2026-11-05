@@ -1,19 +1,14 @@
 import express from "express";
-import Anthropic from "@anthropic-ai/sdk";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SUBJECTS } from "./subjects.js";
+import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning } from "./providers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
-const MODEL = process.env.GAMMA_MODEL || "claude-opus-5-5";
-
-// Kalit ANTHROPIC_API_KEY muhit o'zgaruvchisidan (yoki .env faylidan) olinadi.
-const client = new Anthropic();
 
 // ---------------------------------------------------------------------------
-// Tizim ko'rsatmasi — Gamma AI shaxsiyati. Bu matn o'zgarmas bo'lgani uchun
-// keshlanadi (prompt caching), bu esa narx va tezlikni yaxshilaydi.
+// Tizim ko'rsatmasi — Gamma AI shaxsiyati (har ikkala provayder uchun bir xil)
 // ---------------------------------------------------------------------------
 const SUBJECT_LIST = SUBJECTS.map((s, i) => `${i + 1}. ${s.name}`).join("\n");
 
@@ -116,62 +111,40 @@ app.post("/api/chat", async (req, res) => {
   });
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
-  const stream = client.beta.messages.stream({
-    model: MODEL,
-    max_tokens: 32000,
-    // Professor darajasidagi chuqur fikrlash
-    thinking: { type: "adaptive" },
-    output_config: { effort: "high" },
-    // Xavfsizlik filtri so'rovni rad etsa, Anthropic tavsiya qilgan modelda qayta urinadi
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    cache_control: { type: "ephemeral" },
-    system: [
-      { type: "text", text: BASE_SYSTEM, cache_control: { type: "ephemeral" } },
-      { type: "text", text: subjectInstruction(subject) },
-    ],
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
-  });
-
+  const abort = new AbortController();
   let closed = false;
   res.on("close", () => {
     closed = true;
-    stream.abort();
+    abort.abort();
   });
 
   try {
     send("status", { state: "thinking" });
-    for await (const event of stream) {
-      if (closed) break;
-      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-        send("delta", { text: event.delta.text });
-      }
-    }
+    const stop = await streamAnswer({
+      systemParts: [BASE_SYSTEM, subjectInstruction(subject)],
+      messages,
+      signal: abort.signal,
+      onText: (text) => {
+        if (!closed) send("delta", { text });
+      },
+    });
     if (closed) return;
-    const final = await stream.finalMessage();
-    if (final.stop_reason === "refusal") {
+    if (stop === "refusal") {
       send("error", { error: "Kechirasiz, ushbu so'rovga javob bera olmayman. Iltimos, savolni boshqacha ifodalang." });
-    } else if (final.stop_reason === "max_tokens") {
-      send("done", { truncated: true });
     } else {
-      send("done", {});
+      send("done", { truncated: stop === "max_tokens" });
     }
   } catch (err) {
     if (closed) return;
-    console.error("Claude API xatosi:", err);
-    let message = "Serverda xatolik yuz berdi. Iltimos, birozdan so'ng qayta urinib ko'ring.";
-    if (err instanceof Anthropic.RateLimitError) message = "Hozir so'rovlar juda ko'p. Iltimos, biroz kuting.";
-    else if (err instanceof Anthropic.AuthenticationError) message = "Server sozlanmagan: API kaliti noto'g'ri yoki ko'rsatilmagan.";
-    else if (err instanceof Anthropic.APIConnectionError) message = "Sun'iy intellekt xizmatiga ulanib bo'lmadi.";
-    send("error", { error: message });
+    console.error(`${PROVIDER} API xatosi:`, err);
+    send("error", { error: friendlyError(err) });
   } finally {
     if (!closed) res.end();
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Gamma AI ishga tushdi: http://localhost:${PORT}  (model: ${MODEL})`);
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
-    console.warn("DIQQAT: ANTHROPIC_API_KEY ko'rsatilmagan. .env faylini yarating (.env.example'ga qarang).");
-  }
+  console.log(`Gamma AI ishga tushdi: http://localhost:${PORT}  (provayder: ${PROVIDER}, model: ${MODEL})`);
+  const warning = missingKeyWarning();
+  if (warning) console.warn(warning);
 });
