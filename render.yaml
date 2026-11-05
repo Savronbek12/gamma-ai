@@ -1,0 +1,20 @@
+# Render.com uchun sozlama (Blueprint)
+services:
+  - type: web
+    name: gamma-ai
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: ANTHROPIC_API_KEY
+        sync: false   # Render panelida qo'lda kiritiladi (maxfiy)
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "15"
+    domains:
+      - gamma-ai.uz
+      - www.gamma-ai.uz

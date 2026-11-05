@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gamma AI</title>
+  <meta name="description" content="Gamma AI — 30 fan bo'yicha professor darajasidagi sun'iy intellekt. Rasmiy, ilmiy va tushunarli tushuntirishlar.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%231f3a8a'/><text x='50' y='72' font-size='64' text-anchor='middle' fill='white' font-family='Georgia,serif'>γ</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="logo">γ</div>
+        <div>
+          <div class="brand-name">Gamma AI</div>
+          <div class="brand-sub">Gamma-AI.uz</div>
+        </div>
+      </div>
+
+      <button class="new-chat" id="newChat" type="button">+ Yangi suhbat</button>
+
+      <div class="subjects-head">
+        <span>Fanlar</span>
+        <span class="count" id="subjectCount">30</span>
+      </div>
+      <input class="subject-search" id="subjectSearch" type="search" placeholder="Fanni qidirish…" aria-label="Fanni qidirish">
+      <nav class="subjects" id="subjects" aria-label="Fanlar ro'yxati"></nav>
+    </aside>
+
+    <div class="backdrop" id="backdrop"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="menu-btn" id="menuBtn" type="button" aria-label="Fanlar menyusi">☰</button>
+        <div class="current">
+          <span class="current-label">Joriy fan</span>
+          <span class="current-name" id="currentSubject">Umumiy</span>
+        </div>
+        <button class="theme-btn" id="themeBtn" type="button" aria-label="Mavzuni almashtirish">◐</button>
+      </header>
+
+      <section class="chat" id="chat" aria-live="polite">
+        <div class="welcome" id="welcome">
+          <div class="welcome-logo">γ</div>
+          <h1>Assalomu alaykum. Men — Gamma AI.</h1>
+          <p>30 ta fan bo'yicha professor darajasida savollaringizga rasmiy va ilmiy uslubda javob beraman, murakkab mavzularni bosqichma-bosqich tushuntiraman.</p>
+          <div class="suggestions" id="suggestions"></div>
+        </div>
+      </section>
+
+      <form class="composer" id="composer">
+        <textarea id="input" rows="1" placeholder="Savolingizni yozing…" aria-label="Savol" maxlength="12000"></textarea>
+        <button type="submit" id="sendBtn" aria-label="Yuborish">➤</button>
+      </form>
+      <p class="disclaimer">Gamma AI xato qilishi mumkin. Muhim ma'lumotlarni tekshirib ko'ring.</p>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
