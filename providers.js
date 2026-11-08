@@ -28,6 +28,12 @@ export function missingKeyWarning() {
   return null;
 }
 
+// So'rov model limitiga sig'madimi (tarixni qisqartirib qayta urinish mumkin)
+export function isTooLarge(err) {
+  const msg = String(err?.message || "");
+  return err?.status === 413 || /reduce your message size|request too large|context length|maximum context/i.test(msg);
+}
+
 // Xatoni foydalanuvchiga tushunarli o'zbekcha matnga aylantiradi
 export function friendlyError(err) {
   const status = err?.status;
@@ -36,8 +42,8 @@ export function friendlyError(err) {
   if (err instanceof Anthropic.APIConnectionError || err instanceof Groq.APIConnectionError) {
     return "Sun'iy intellekt xizmatiga ulanib bo'lmadi.";
   }
-  if (status === 413 || /too large|context length|maximum context/i.test(String(err?.message))) {
-    return "Suhbat juda uzun bo'lib ketdi. Iltimos, yangi suhbat boshlang.";
+  if (isTooLarge(err)) {
+    return "Savolingiz juda uzun. Iltimos, uni qisqartirib qayta yuboring.";
   }
   const isApiError = err instanceof ApiError || err instanceof Anthropic.APIError || err instanceof Groq.APIError;
   if (!isApiError && /api key|apiKey|API_KEY|credentials/i.test(String(err?.message))) {
@@ -60,14 +66,15 @@ export async function streamAnswer(args) {
   return streamGroq(args);
 }
 
-async function streamGroq({ systemParts, messages, signal, onText }) {
-  groq ??= new Groq(); // GROQ_API_KEY muhit o'zgaruvchisidan olinadi
+async function streamGroq({ systemParts, messages, signal, onText, maxTokens }) {
+  // GROQ_API_KEY muhit o'zgaruvchisidan olinadi. Qayta urinishlar kam — aks holda xato juda kech chiqadi.
+  groq ??= new Groq({ maxRetries: 1, timeout: 90_000 });
   const stream = await groq.chat.completions.create(
     {
       model: MODEL,
       stream: true,
-      // Fikrlash + javob uchun chegara. Groq bepul tarifida token limiti past bo'lgani uchun o'rtacha qiymat.
-      max_completion_tokens: Number(process.env.MAX_OUTPUT_TOKENS) || 8000,
+      // Fikrlash + javob uchun chegara. Groq bepul tarifi bu qiymatni ham daqiqalik token limitiga qo'shib hisoblaydi.
+      max_completion_tokens: maxTokens || Number(process.env.MAX_OUTPUT_TOKENS) || 3500,
       // "high" — javobdan oldin chuqurroq o'ylaydi (faktik xatolar kamroq, biroz sekinroq)
       reasoning_effort: process.env.REASONING_EFFORT || "high",
       reasoning_format: "hidden", // fikrlash jarayoni foydalanuvchiga ko'rsatilmaydi
