@@ -27,7 +27,10 @@ function load() {
       for (const m of raw.messages) {
         if (!m || typeof m.content !== "string" || !m.content.trim()) continue;
         const expected = clean.length % 2 === 0 ? "user" : "assistant";
-        if (m.role === expected) clean.push({ role: m.role, content: m.content });
+        if (m.role !== expected) continue;
+        const item = { role: m.role, content: m.content };
+        if (m.role === "assistant" && Array.isArray(m.sources)) item.sources = m.sources;
+        clean.push(item);
       }
       // Javobsiz qolgan oxirgi savolni olib tashlaymiz
       if (clean.at(-1)?.role === "user") clean.pop();
@@ -81,8 +84,23 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// ---------- Wikipedia manbalari ----------
+const isWikiUrl = (u) => {
+  try { const x = new URL(String(u)); return x.protocol === "https:" && x.hostname.endsWith(".wikipedia.org"); } catch { return false; }
+};
+function sourcesHtml(sources) {
+  const list = (Array.isArray(sources) ? sources : []).filter(
+    (s) => s && typeof s.title === "string" && isWikiUrl(s.url),
+  );
+  if (!list.length) return "";
+  const items = list
+    .map((s, i) => `<li><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">[${i + 1}] ${escapeHtml(s.title)}</a></li>`)
+    .join("");
+  return `<div class="sources"><span>Wikipedia manbalari:</span><ol>${items}</ol></div>`;
+}
+
 // ---------- Xabarlarni chizish ----------
-function addMessageEl(role, content) {
+function addMessageEl(role, content, sources) {
   welcomeEl.hidden = true;
   const wrap = document.createElement("div");
   wrap.className = `msg ${role}`;
@@ -95,7 +113,7 @@ function addMessageEl(role, content) {
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   if (role === "user") bubble.textContent = content;
-  else bubble.innerHTML = content ? renderMarkdown(content) : "";
+  else bubble.innerHTML = content ? renderMarkdown(content) + sourcesHtml(sources) : "";
   wrap.appendChild(bubble);
   chatEl.appendChild(wrap);
   return bubble;
@@ -103,7 +121,7 @@ function addMessageEl(role, content) {
 function renderAll() {
   chatEl.querySelectorAll(".msg").forEach((n) => n.remove());
   welcomeEl.hidden = state.messages.length > 0;
-  for (const m of state.messages) addMessageEl(m.role, m.content);
+  for (const m of state.messages) addMessageEl(m.role, m.content, m.sources);
   scrollDown(true);
 }
 function scrollDown(force) {
@@ -186,13 +204,14 @@ async function send(text) {
   let answer = "";
   let errorText = null;
   let truncated = false;
+  let sources = [];
   controller = new AbortController();
 
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: state.messages, subject: state.subject }),
+      body: JSON.stringify({ messages: state.messages.map(({ role, content }) => ({ role, content })), subject: state.subject }),
       signal: controller.signal,
     });
     if (!res.ok || !res.body) {
@@ -205,7 +224,7 @@ async function send(text) {
     let pending = false;
     const paint = () => {
       pending = false;
-      bubble.innerHTML = renderMarkdown(answer);
+      bubble.innerHTML = renderMarkdown(answer) + sourcesHtml(sources);
       scrollDown();
     };
     while (true) {
@@ -223,6 +242,8 @@ async function send(text) {
         if (ev === "delta") {
           answer += data.text;
           if (!pending) { pending = true; requestAnimationFrame(paint); }
+        } else if (ev === "sources") {
+          sources = Array.isArray(data.sources) ? data.sources : [];
         } else if (ev === "status" && data.state === "waiting" && !answer) {
           bubble.innerHTML =
             '<div class="typing"><span></span><span></span><span></span></div>' +
@@ -247,11 +268,11 @@ async function send(text) {
   }
 
   if (answer) {
-    let html = renderMarkdown(answer);
+    let html = renderMarkdown(answer) + sourcesHtml(sources);
     if (truncated) html += '<p class="note">Javob uzunlik chegarasiga yetdi. Davom ettirish uchun «Davom eting» deb yozing.</p>';
     if (errorText) html += `<p class="error">${escapeHtml(errorText)}</p>`;
     bubble.innerHTML = html;
-    state.messages.push({ role: "assistant", content: answer });
+    state.messages.push(sources.length ? { role: "assistant", content: answer, sources } : { role: "assistant", content: answer });
   } else {
     bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Javob olinmadi.")}</p>`;
     // Javobsiz savolni tarixdan olib tashlaymiz, shunda qayta yuborish mumkin

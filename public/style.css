@@ -173,6 +173,10 @@ button, input, textarea { font: inherit; color: inherit; }
 .bubble blockquote { border-left: 3px solid var(--accent); margin: .8em 0; padding: 0 0 0 12px; color: var(--muted); }
 .bubble .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
 .bubble .error { color: var(--danger); }
+.bubble .sources { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.bubble .sources ol { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.bubble .sources a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+.bubble .sources a:hover { text-decoration: underline; }
 .bubble .note { color: var(--muted); font-size: 13px; font-style: italic; }
 
 .typing { display: inline-flex; gap: 4px; padding: 8px 0; }

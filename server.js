@@ -2,6 +2,7 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SUBJECTS } from "./subjects.js";
+import { wikipediaContext, wikipediaInstruction } from "./wikipedia.js";
 import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs } from "./providers.js";
 
 const MAX_RATE_WAIT_MS = 45_000; // daqiqalik limitda foydalanuvchini ko'pi bilan shuncha kuttiramiz
@@ -71,6 +72,8 @@ const MAX_CHARS_PER_MESSAGE = 8000; // faqat foydalanuvchi xabari uchun
 // Groq bepul tarifida (savol + tarix + javob uchun ajratilgan joy) daqiqasiga ~8000 tokendan oshmasligi kerak,
 // o'zbekcha matnda 1 token ≈ 2.5 belgi, shuning uchun Groq uchun tarix kichikroq.
 const HISTORY_CHAR_BUDGET = Number(process.env.HISTORY_CHAR_BUDGET) || (PROVIDER === "groq" ? 6000 : 60000);
+// Wikipedia parchalari uchun ajratiladigan joy (belgilarda); u tarix byudjetidan ayiriladi
+const WIKI_CHAR_BUDGET = Number(process.env.WIKI_CHAR_BUDGET) || (PROVIDER === "groq" ? 2500 : 8000);
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_PER_MINUTE) || 15;
 const hits = new Map();
@@ -155,11 +158,20 @@ app.post("/api/chat", async (req, res) => {
 
   try {
     send("status", { state: "thinking" });
+    // Ochiq Wikipedia'dan savolga oid ma'lumot (topilmasa yoki xato bo'lsa — usiz davom etamiz)
+    const wiki = await wikipediaContext(messages, { maxChars: WIKI_CHAR_BUDGET, signal: abort.signal }).catch((err) => {
+      console.warn("Wikipedia qidiruvi xatosi:", err?.message);
+      return null;
+    });
+    if (closed) return;
+    if (wiki) send("sources", { sources: wiki.sources });
+    const systemParts = [BASE_SYSTEM, subjectInstruction(subject), ...(wiki ? [wikipediaInstruction(wiki.context)] : [])];
+    const historyBudget = Math.max(0, HISTORY_CHAR_BUDGET - (wiki ? wiki.context.length : 0));
     // Model "so'rov juda katta" desa, foydalanuvchiga xato ko'rsatmasdan
     // qisqaroq tarix va kichikroq javob chegarasi bilan qayta urinamiz.
     const attempts = [
-      { budget: HISTORY_CHAR_BUDGET },
-      { budget: Math.floor(HISTORY_CHAR_BUDGET / 3), maxTokens: 2500 },
+      { budget: historyBudget },
+      { budget: Math.floor(historyBudget / 3), maxTokens: 2500 },
       { budget: 0, maxTokens: 2000 }, // faqat oxirgi savol
     ];
     let stop;
@@ -168,7 +180,7 @@ app.post("/api/chat", async (req, res) => {
     for (let i = 0; i < attempts.length; i++) {
       try {
         stop = await streamAnswer({
-          systemParts: [BASE_SYSTEM, subjectInstruction(subject)],
+          systemParts,
           messages: trimHistory(messages, attempts[i].budget),
           maxTokens: attempts[i].maxTokens,
           signal: abort.signal,
