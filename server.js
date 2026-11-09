@@ -2,7 +2,14 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SUBJECTS } from "./subjects.js";
-import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge } from "./providers.js";
+import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs } from "./providers.js";
+
+const MAX_RATE_WAIT_MS = 45_000; // daqiqalik limitda foydalanuvchini ko'pi bilan shuncha kuttiramiz
+const sleep = (ms, signal) =>
+  new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+  });
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -155,6 +162,7 @@ app.post("/api/chat", async (req, res) => {
     ];
     let stop;
     let sentText = false;
+    let waitedMs = 0;
     for (let i = 0; i < attempts.length; i++) {
       try {
         stop = await streamAnswer({
@@ -169,9 +177,24 @@ app.post("/api/chat", async (req, res) => {
         });
         break;
       } catch (err) {
-        const canRetry = isTooLarge(err) && !sentText && !closed && i < attempts.length - 1;
-        if (!canRetry) throw err;
-        console.warn(`So'rov juda katta (${i + 1}-urinish), qisqaroq tarix bilan qayta urinilmoqda`);
+        if (sentText || closed) throw err;
+        // Daqiqalik limit: aytilgan vaqtcha kutib, xuddi shu urinishni takrorlaymiz (jami 45 soniyagacha)
+        const wait = rateLimitWaitMs(err);
+        if (wait !== null && waitedMs + wait <= MAX_RATE_WAIT_MS) {
+          waitedMs += wait + 500;
+          send("status", { state: "waiting", seconds: Math.ceil((wait + 500) / 1000) });
+          console.warn(`Daqiqalik limit, ${wait} ms kutilmoqda`);
+          await sleep(wait + 500, abort.signal);
+          if (closed) return;
+          i--; // xuddi shu urinishni takrorlash
+          continue;
+        }
+        // So'rov juda katta: qisqaroq tarix bilan keyingi urinish
+        if (isTooLarge(err) && i < attempts.length - 1) {
+          console.warn(`So'rov juda katta (${i + 1}-urinish), qisqaroq tarix bilan qayta urinilmoqda`);
+          continue;
+        }
+        throw err;
       }
     }
     if (closed) return;

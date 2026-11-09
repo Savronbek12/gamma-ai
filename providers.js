@@ -34,6 +34,21 @@ export function isTooLarge(err) {
   return err?.status === 413 || /reduce your message size|request too large|context length|maximum context/i.test(msg);
 }
 
+// Daqiqalik limit (429) bo'lsa, necha millisekund kutish kerakligini qaytaradi; aks holda null.
+// Groq "Please try again in 7.66s" deb yozadi va/yoki retry-after sarlavhasini yuboradi.
+export function rateLimitWaitMs(err) {
+  if (err?.status !== 429) return null;
+  const header = typeof err.headers?.get === "function" ? err.headers.get("retry-after") : err.headers?.["retry-after"];
+  if (header && !Number.isNaN(Number(header))) return Math.ceil(Number(header) * 1000);
+  const m = /try again in (?:(\d+)m)?([\d.]+)(ms|s)/i.exec(String(err.message || ""));
+  if (m) {
+    const minutes = Number(m[1] || 0);
+    const value = Number(m[2]);
+    return Math.ceil(minutes * 60_000 + (m[3] === "ms" ? value : value * 1000));
+  }
+  return 5000;
+}
+
 // Xatoni foydalanuvchiga tushunarli o'zbekcha matnga aylantiradi
 export function friendlyError(err) {
   const status = err?.status;
@@ -68,7 +83,8 @@ export async function streamAnswer(args) {
 
 async function streamGroq({ systemParts, messages, signal, onText, maxTokens }) {
   // GROQ_API_KEY muhit o'zgaruvchisidan olinadi. Qayta urinishlar kam — aks holda xato juda kech chiqadi.
-  groq ??= new Groq({ maxRetries: 1, timeout: 90_000 });
+  // Qayta urinishlarni server.js o'zi boshqaradi (limitda kutish, tarixni qisqartirish)
+  groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
   const stream = await groq.chat.completions.create(
     {
       model: MODEL,

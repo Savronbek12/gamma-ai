@@ -223,6 +223,10 @@ async function send(text) {
         if (ev === "delta") {
           answer += data.text;
           if (!pending) { pending = true; requestAnimationFrame(paint); }
+        } else if (ev === "status" && data.state === "waiting" && !answer) {
+          bubble.innerHTML =
+            '<div class="typing"><span></span><span></span><span></span></div>' +
+            `<p class="note">Hozir so'rovlar ko'p — navbatingiz kutilmoqda (taxminan ${Number(data.seconds) || 5} soniya)…</p>`;
         } else if (ev === "error") {
           errorText = data.error;
         } else if (ev === "done") {
