@@ -1,6 +1,8 @@
 # Gamma AI — Gamma-AI.uz
 
 > Suhbatlashadigan va fanlar bo'yicha mutaxassis ustoz.
+>
+> Yaratuvchi: **Savronbek**
 
 30 ta fan bo'yicha professor darajasidagi, rasmiy uslubda muloqot qiladigan sun'iy intellekt sayti.
 Sun'iy intellekt: **Groq** (bepul, standart, model `openai/gpt-oss-120b`), **Google Gemini** (bepul) yoki **Claude** (pullik) — `AI_PROVIDER` sozlamasi bilan tanlanadi.
