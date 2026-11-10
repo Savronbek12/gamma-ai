@@ -451,8 +451,7 @@ function applyTheme(t) {
 }
 try { applyTheme(localStorage.getItem("gamma-ai-theme")); } catch {}
 $("themeBtn").addEventListener("click", () => {
-  const current = document.documentElement.dataset.theme ||
-    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const current = document.documentElement.dataset.theme || "dark";
   const next = current === "dark" ? "light" : "dark";
   applyTheme(next);
   try { localStorage.setItem("gamma-ai-theme", next); } catch {}
