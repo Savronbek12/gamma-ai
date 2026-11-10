@@ -43,6 +43,7 @@ function load() {
         if (m.role === "assistant" && Array.isArray(m.sources)) item.sources = m.sources;
         if (m.role === "assistant" && typeof m.image === "string" && m.image.startsWith("data:image/")) item.image = m.image;
         if (m.role === "assistant" && m.imageLost) item.imageLost = true;
+        if (m.role === "assistant" && typeof m.imageSource === "string") item.imageSource = m.imageSource;
         clean.push(item);
       }
       // Javobsiz qolgan oxirgi savolni olib tashlaymiz
@@ -114,12 +115,12 @@ function sourcesHtml(sources) {
 
 // ---------- Xabarlarni chizish ----------
 // ---------- Yaratilgan rasmlar ----------
-function imageHtml(src, prompt) {
-  const caption = `<figcaption><span>Gemini yaratgan rasm</span><a href="${escapeHtml(src)}" download="gamma-ai-rasm.jpg">Yuklab olish</a></figcaption>`;
+function imageHtml(src, prompt, source) {
+  const caption = `<figcaption><span>${source ? escapeHtml(source) + " yaratgan rasm" : "Yaratilgan rasm"}</span><a href="${escapeHtml(src)}" download="gamma-ai-rasm.jpg">Yuklab olish</a></figcaption>`;
   return `<figure class="gen-image"><img src="${escapeHtml(src)}" alt="${escapeHtml(prompt || "Yaratilgan rasm")}" loading="lazy">${caption}</figure>`;
 }
 function imageMessageHtml(m) {
-  if (m.image) return imageHtml(m.image, m.content);
+  if (m.image) return imageHtml(m.image, m.content, m.imageSource);
   return renderMarkdown(m.content) + (m.imageLost ? '<p class="note">Rasm brauzer xotirasi to\'lgani sababli saqlanmadi.</p>' : "");
 }
 
@@ -261,11 +262,12 @@ async function sendImage(text) {
   save();
   addMessageEl("user", text);
   const bubble = addMessageEl("assistant", "");
-  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div><p class="note">Rasm yaratilmoqda… (odatda 10–30 soniya)</p>';
+  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div><p class="note">Rasm yaratilmoqda… (odatda 10–60 soniya)</p>';
   scrollDown(true);
   controller = new AbortController();
 
   let image = null;
+  let imageSource = null;
   let errorText = null;
   try {
     const res = await fetch("/api/image", {
@@ -277,6 +279,7 @@ async function sendImage(text) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.image) throw new Error(data.error || "Rasm yaratilmadi.");
     image = await compressImage(data.image);
+    imageSource = typeof data.source === "string" ? data.source : null;
   } catch (err) {
     if (err.name !== "AbortError") errorText = err.message || "Tarmoq xatosi.";
   }
@@ -289,6 +292,7 @@ async function sendImage(text) {
   }
   if (image) {
     const msg = { role: "assistant", content: `Foydalanuvchi so'roviga ko'ra rasm yaratildi: «${text}».`, image };
+    if (imageSource) msg.imageSource = imageSource;
     bubble.innerHTML = imageMessageHtml(msg);
     state.messages.push(msg);
   } else {

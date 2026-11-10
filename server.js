@@ -233,13 +233,13 @@ app.post("/api/chat", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Rasm yaratish (Gemini)
+// Rasm yaratish (Gemini / Pollinations)
 // ---------------------------------------------------------------------------
 app.get("/api/features", (_req, res) => res.json({ images: imagesEnabled() }));
 
 app.post("/api/image", async (req, res) => {
   if (!imagesEnabled()) {
-    return res.status(503).json({ error: "Rasm yaratish hozircha sozlanmagan (serverda GEMINI_API_KEY yo'q)." });
+    return res.status(503).json({ error: "Rasm yaratish hozircha o'chirilgan." });
   }
   if (rateLimited(req.ip, imageHits, IMAGE_RATE_LIMIT_MAX)) {
     return res.status(429).json({ error: "Rasm so'rovlari juda ko'p. Iltimos, bir daqiqadan so'ng qayta urinib ko'ring." });
@@ -252,10 +252,10 @@ app.post("/api/image", async (req, res) => {
   res.on("close", () => { if (!res.writableEnded) abort.abort(); });
   try {
     const img = await generateImage(prompt, { signal: abort.signal });
-    res.json({ image: `data:${img.mime};base64,${img.data}`, text: img.text });
+    res.json({ image: `data:${img.mime};base64,${img.data}`, text: img.text, source: img.source });
   } catch (err) {
     if (abort.signal.aborted) return;
-    console.error("Gemini rasm xatosi:", err?.status, err?.message);
+    console.error("Rasm xatosi:", err?.status, err?.message);
     res.status(err?.status === 429 ? 429 : 502).json({ error: imageErrorMessage(err) });
   }
 });
