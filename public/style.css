@@ -201,6 +201,14 @@ button, input, textarea { font: inherit; color: inherit; }
   background: var(--accent); color: var(--accent-text); font-size: 16px; flex-shrink: 0;
 }
 .composer button:disabled { opacity: .45; cursor: not-allowed; }
+.composer .image-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); margin-left: -6px; }
+.composer .image-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.composer .image-btn[hidden] { display: none; }
+.bubble .gen-image { margin: 0; }
+.bubble .gen-image img { display: block; max-width: min(100%, 512px); height: auto; border-radius: 12px; border: 1px solid var(--border); }
+.bubble .gen-image figcaption { margin-top: 8px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.bubble .gen-image a { color: var(--accent); text-decoration: none; }
+.bubble .gen-image a:hover { text-decoration: underline; }
 .disclaimer { text-align: center; color: var(--muted); font-size: 12px; margin: 8px 16px 12px; }
 
 .backdrop { display: none; }

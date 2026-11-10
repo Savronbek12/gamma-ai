@@ -15,5 +15,7 @@ services:
         value: groq
       - key: GROQ_API_KEY
         sync: false   # Render panelida qo'lda kiritiladi (maxfiy)
+      - key: GEMINI_API_KEY
+        sync: false   # rasm yaratish uchun (ixtiyoriy)
       - key: RATE_LIMIT_PER_MINUTE
         value: "15"

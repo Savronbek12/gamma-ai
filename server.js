@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SUBJECTS } from "./subjects.js";
 import { wikipediaContext, wikipediaInstruction } from "./wikipedia.js";
+import { generateImage, imageErrorMessage, imagesEnabled } from "./images.js";
 import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs } from "./providers.js";
 
 const MAX_RATE_WAIT_MS = 45_000; // daqiqalik limitda foydalanuvchini ko'pi bilan shuncha kuttiramiz
@@ -76,19 +77,24 @@ const HISTORY_CHAR_BUDGET = Number(process.env.HISTORY_CHAR_BUDGET) || (PROVIDER
 const WIKI_CHAR_BUDGET = Number(process.env.WIKI_CHAR_BUDGET) || (PROVIDER === "groq" ? 2500 : 8000);
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_PER_MINUTE) || 15;
+// Rasm yaratish qimmatroq — alohida, qattiqroq limit
+const IMAGE_RATE_LIMIT_MAX = Number(process.env.IMAGE_RATE_LIMIT_PER_MINUTE) || 4;
 const hits = new Map();
+const imageHits = new Map();
 
-function rateLimited(ip) {
+function rateLimited(ip, store = hits, max = RATE_LIMIT_MAX) {
   const now = Date.now();
-  const recent = (hits.get(ip) || []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  const recent = (store.get(ip) || []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
   recent.push(now);
-  hits.set(ip, recent);
-  return recent.length > RATE_LIMIT_MAX;
+  store.set(ip, recent);
+  return recent.length > max;
 }
 setInterval(() => {
   const now = Date.now();
-  for (const [ip, times] of hits) {
-    if (times.every((t) => now - t >= RATE_LIMIT_WINDOW_MS)) hits.delete(ip);
+  for (const store of [hits, imageHits]) {
+    for (const [ip, times] of store) {
+      if (times.every((t) => now - t >= RATE_LIMIT_WINDOW_MS)) store.delete(ip);
+    }
   }
 }, RATE_LIMIT_WINDOW_MS).unref();
 
@@ -223,6 +229,34 @@ app.post("/api/chat", async (req, res) => {
     send("error", { error: friendlyError(err) });
   } finally {
     if (!closed) res.end();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Rasm yaratish (Gemini)
+// ---------------------------------------------------------------------------
+app.get("/api/features", (_req, res) => res.json({ images: imagesEnabled() }));
+
+app.post("/api/image", async (req, res) => {
+  if (!imagesEnabled()) {
+    return res.status(503).json({ error: "Rasm yaratish hozircha sozlanmagan (serverda GEMINI_API_KEY yo'q)." });
+  }
+  if (rateLimited(req.ip, imageHits, IMAGE_RATE_LIMIT_MAX)) {
+    return res.status(429).json({ error: "Rasm so'rovlari juda ko'p. Iltimos, bir daqiqadan so'ng qayta urinib ko'ring." });
+  }
+  const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
+  if (!prompt) return res.status(400).json({ error: "Rasm tavsifini yozing." });
+  if (prompt.length > 2000) return res.status(400).json({ error: "Tavsif juda uzun (2 000 belgidan oshmasin)." });
+
+  const abort = new AbortController();
+  res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+  try {
+    const img = await generateImage(prompt, { signal: abort.signal });
+    res.json({ image: `data:${img.mime};base64,${img.data}`, text: img.text });
+  } catch (err) {
+    if (abort.signal.aborted) return;
+    console.error("Gemini rasm xatosi:", err?.status, err?.message);
+    res.status(err?.status === 429 ? 429 : 502).json({ error: imageErrorMessage(err) });
   }
 });
 

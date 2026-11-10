@@ -15,7 +15,18 @@ let controller = null;
 
 // ---------- Saqlash (faqat shu brauzerda) ----------
 function save() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+  // Rasmlar joy egallaydi: xotira to'lsa, eng eski rasmlardan boshlab o'chiramiz (matni qoladi)
+  for (;;) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      return;
+    } catch {
+      const old = state.messages.find((m) => m.image);
+      if (!old) return;
+      delete old.image;
+      old.imageLost = true;
+    }
+  }
 }
 function load() {
   try {
@@ -30,6 +41,8 @@ function load() {
         if (m.role !== expected) continue;
         const item = { role: m.role, content: m.content };
         if (m.role === "assistant" && Array.isArray(m.sources)) item.sources = m.sources;
+        if (m.role === "assistant" && typeof m.image === "string" && m.image.startsWith("data:image/")) item.image = m.image;
+        if (m.role === "assistant" && m.imageLost) item.imageLost = true;
         clean.push(item);
       }
       // Javobsiz qolgan oxirgi savolni olib tashlaymiz
@@ -100,7 +113,17 @@ function sourcesHtml(sources) {
 }
 
 // ---------- Xabarlarni chizish ----------
-function addMessageEl(role, content, sources) {
+// ---------- Yaratilgan rasmlar ----------
+function imageHtml(src, prompt) {
+  const caption = `<figcaption><span>Gemini yaratgan rasm</span><a href="${escapeHtml(src)}" download="gamma-ai-rasm.jpg">Yuklab olish</a></figcaption>`;
+  return `<figure class="gen-image"><img src="${escapeHtml(src)}" alt="${escapeHtml(prompt || "Yaratilgan rasm")}" loading="lazy">${caption}</figure>`;
+}
+function imageMessageHtml(m) {
+  if (m.image) return imageHtml(m.image, m.content);
+  return renderMarkdown(m.content) + (m.imageLost ? '<p class="note">Rasm brauzer xotirasi to\'lgani sababli saqlanmadi.</p>' : "");
+}
+
+function addMessageEl(role, content, sources, msg) {
   welcomeEl.hidden = true;
   const wrap = document.createElement("div");
   wrap.className = `msg ${role}`;
@@ -113,6 +136,7 @@ function addMessageEl(role, content, sources) {
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   if (role === "user") bubble.textContent = content;
+  else if (msg && (msg.image || msg.imageLost)) bubble.innerHTML = imageMessageHtml(msg);
   else bubble.innerHTML = content ? renderMarkdown(content) + sourcesHtml(sources) : "";
   wrap.appendChild(bubble);
   chatEl.appendChild(wrap);
@@ -121,7 +145,7 @@ function addMessageEl(role, content, sources) {
 function renderAll() {
   chatEl.querySelectorAll(".msg").forEach((n) => n.remove());
   welcomeEl.hidden = state.messages.length > 0;
-  for (const m of state.messages) addMessageEl(m.role, m.content, m.sources);
+  for (const m of state.messages) addMessageEl(m.role, m.content, m.sources, m);
   scrollDown(true);
 }
 function scrollDown(force) {
@@ -183,10 +207,104 @@ function renderSuggestions() {
   }
 }
 
+// ---------- Rasm rejimi ----------
+const imageBtn = $("imageBtn");
+let imagesAvailable = false;
+let imageMode = false;
+
+// "Mushukning rasmini chizib bering", "нарисуй…", "draw a…" kabi so'rovlarni aniqlash
+const IMAGE_INTENT = [
+  /\b(rasm|rasmi|rasmini|rasmni|surat|surati|suratini|suratni|tasvir|tasviri|tasvirini|tasvirni|illyustratsiya|illyustratsiyasini)\b[^.?!]{0,60}\b(chiz|yarat|yasa|tayyorla|chiqar|generatsiya)/i,
+  /(нарисуй|нарисуйте|(сгенерируй|создай|сделай)\S*\s+(\S+\s+)?(картинк|изображени|рисун))/i,
+  /\b(draw|paint|(generate|create|make)\s+(me\s+)?an?\s+(image|picture|illustration|drawing))\b/i,
+];
+const wantsImage = (text) => IMAGE_INTENT.some((re) => re.test(text));
+
+function setImageMode(on) {
+  imageMode = on && imagesAvailable;
+  imageBtn.setAttribute("aria-pressed", String(imageMode));
+  inputEl.placeholder = imageMode ? "Rasm tavsifini yozing… (masalan: tog'lar orasidagi ko'l, akvarel uslubida)" : "Savolingizni yozing…";
+}
+imageBtn.addEventListener("click", () => {
+  setImageMode(!imageMode);
+  inputEl.focus();
+});
+
+// Rasmni brauzerda saqlash uchun kichraytiramiz (JPEG, eng katta tomoni 1024px)
+function compressImage(dataUrl, maxSide = 1024, quality = 0.88) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      try { resolve(canvas.toDataURL("image/jpeg", quality)); } catch { resolve(dataUrl); }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+async function sendImage(text) {
+  busy = true;
+  sendBtn.disabled = true;
+  inputEl.value = "";
+  autosize();
+
+  state.messages.push({ role: "user", content: text });
+  const convo = state.messages;
+  save();
+  addMessageEl("user", text);
+  const bubble = addMessageEl("assistant", "");
+  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div><p class="note">Rasm yaratilmoqda… (odatda 10–30 soniya)</p>';
+  scrollDown(true);
+  controller = new AbortController();
+
+  let image = null;
+  let errorText = null;
+  try {
+    const res = await fetch("/api/image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: text }),
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.image) throw new Error(data.error || "Rasm yaratilmadi.");
+    image = await compressImage(data.image);
+  } catch (err) {
+    if (err.name !== "AbortError") errorText = err.message || "Tarmoq xatosi.";
+  }
+
+  busy = false;
+  controller = null;
+  if (state.messages !== convo) {
+    sendBtn.disabled = !inputEl.value.trim();
+    return;
+  }
+  if (image) {
+    const msg = { role: "assistant", content: `Foydalanuvchi so'roviga ko'ra rasm yaratildi: «${text}».`, image };
+    bubble.innerHTML = imageMessageHtml(msg);
+    state.messages.push(msg);
+  } else {
+    bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Rasm yaratilmadi.")}</p>`;
+    state.messages.pop();
+  }
+  save();
+  scrollDown(true);
+  sendBtn.disabled = !inputEl.value.trim();
+}
+
 // ---------- Yuborish ----------
 async function send(text) {
   text = text.trim();
   if (!text || busy) return;
+  if (imagesAvailable && (imageMode || wantsImage(text))) return sendImage(text);
   busy = true;
   sendBtn.disabled = true;
   inputEl.value = "";
@@ -344,6 +462,12 @@ $("themeBtn").addEventListener("click", () => {
   } catch {
     subjects = [];
   }
+  try {
+    imagesAvailable = !!(await (await fetch("/api/features")).json()).images;
+  } catch {
+    imagesAvailable = false;
+  }
+  imageBtn.hidden = !imagesAvailable;
   $("subjectCount").textContent = String(subjects.length);
   if (!subjects.some((s) => s.id === state.subject)) state.subject = null;
   renderSubjects();
