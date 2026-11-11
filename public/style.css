@@ -1,48 +1,48 @@
-/* Dizayn: iliq to'q ko'mir fon, yashil "3D" tugmalar, qalin sans-serif sarlavhalar.
+/* Dizayn: to'q ko'k fon, ko'k "3D" tugmalar, qalin sans-serif sarlavhalar.
    Logotip ranglari alohida o'zgaruvchilarda — dizaynga bog'liq emas. */
 :root {
-  --bg: #312e2b;
-  --sidebar: #262421;
-  --topbar: #2a2826;
-  --surface: #3c3936;
-  --surface-2: #454240;
-  --border: #4b4847;
+  --bg: #141c2b;
+  --sidebar: #0f1623;
+  --topbar: #121a28;
+  --surface: #1c2638;
+  --surface-2: #243148;
+  --border: #2c3a52;
   --text: #ffffff;
-  --muted: #a7a6a2;
-  --accent: #81b64c;
-  --accent-hover: #95c95c;
-  --accent-shadow: #45753c;
-  --accent-soft: rgba(129, 182, 76, .16);
+  --muted: #9aa8c0;
+  --accent: #3b82f6;
+  --accent-hover: #5b97f8;
+  --accent-shadow: #1f56b8;
+  --accent-soft: rgba(59, 130, 246, .18);
   --accent-text: #ffffff;
-  --link: #9fd16a;
-  --user-bubble: #45753c;
+  --link: #7fb0ff;
+  --user-bubble: #1f56b8;
   --user-text: #ffffff;
-  --code-bg: #262421;
+  --code-bg: #0f1623;
   --danger: #fa6b5c;
-  --card-shadow: 0 3px 0 #1f1e1c;
+  --card-shadow: 0 3px 0 #0a101a;
   --logo-bg: #7d98e8;
   --logo-text: #0f1320;
 }
 :root[data-theme="light"] {
-  --bg: #f1f0ee;
-  --sidebar: #e6e4e1;
+  --bg: #eef3fb;
+  --sidebar: #e1e9f6;
   --topbar: #ffffff;
   --surface: #ffffff;
-  --surface-2: #f5f4f2;
-  --border: #d8d6d2;
-  --text: #312e2b;
-  --muted: #6b6965;
-  --accent: #81b64c;
-  --accent-hover: #8fc458;
-  --accent-shadow: #5d9948;
-  --accent-soft: rgba(129, 182, 76, .18);
+  --surface-2: #f4f7fc;
+  --border: #d3ddee;
+  --text: #14213d;
+  --muted: #5b6b86;
+  --accent: #2f74e8;
+  --accent-hover: #4a88f0;
+  --accent-shadow: #1d55b5;
+  --accent-soft: rgba(47, 116, 232, .14);
   --accent-text: #ffffff;
-  --link: #3f7a2a;
-  --user-bubble: #5d9948;
+  --link: #1d5fd1;
+  --user-bubble: #2f74e8;
   --user-text: #ffffff;
-  --code-bg: #efedea;
+  --code-bg: #eaf0f9;
   --danger: #c0392b;
-  --card-shadow: 0 3px 0 #cfccc7;
+  --card-shadow: 0 3px 0 #cdd8ea;
   --logo-bg: #1f3a8a;
   --logo-text: #ffffff;
 }
@@ -202,10 +202,18 @@ button, input, textarea { font: inherit; color: inherit; }
 .bubble blockquote { border-left: 3px solid var(--accent); margin: .8em 0; padding: 0 0 0 12px; color: var(--muted); }
 .bubble .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
 .bubble .error { color: var(--danger); }
-.bubble .sources { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
-.bubble .sources ol { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
-.bubble .sources a { color: var(--link); font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
-.bubble .sources a:hover { text-decoration: underline; }
+.bubble .sources { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.bubble .sources > span { display: flex; align-items: center; gap: 6px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; font-size: 11.5px; }
+.bubble .sources > span::before {
+  content: "W"; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 4px;
+  background: var(--text); color: var(--surface); font-family: Georgia, serif; font-size: 13px; letter-spacing: 0;
+}
+.bubble .sources ol { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.bubble .sources a {
+  display: inline-block; padding: 5px 10px; border-radius: 6px;
+  background: var(--accent-soft); color: var(--link); font-weight: 700; text-decoration: none; overflow-wrap: anywhere;
+}
+.bubble .sources a:hover { background: var(--accent); color: var(--accent-text); }
 .bubble .note { color: var(--muted); font-size: 13px; font-style: italic; }
 
 .typing { display: inline-flex; gap: 4px; padding: 4px 0; }

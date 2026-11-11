@@ -179,7 +179,7 @@ function sourcesHtml(sources) {
   const items = list
     .map((s, i) => `<li><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">[${i + 1}] ${escapeHtml(s.title)}</a></li>`)
     .join("");
-  return `<div class="sources"><span>Wikipedia manbalari:</span><ol>${items}</ol></div>`;
+  return `<div class="sources"><span>Wikipedia manbalari</span><ol>${items}</ol></div>`;
 }
 
 // ---------- Yaratilgan rasmlar ----------
