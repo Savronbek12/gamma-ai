@@ -3,8 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SUBJECTS } from "./subjects.js";
 import { wikipediaContext, wikipediaInstruction } from "./wikipedia.js";
-import { generateImage, imageErrorMessage, imagesEnabled } from "./images.js";
-import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs, generateTitle } from "./providers.js";
+import { searchImages } from "./imagesearch.js";
+import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs, generateTitle, imageSearchQuery } from "./providers.js";
 
 const MAX_RATE_WAIT_MS = 45_000; // daqiqalik limitda foydalanuvchini ko'pi bilan shuncha kuttiramiz
 const sleep = (ms, signal) =>
@@ -53,7 +53,8 @@ Formatlash:
 
 Cheklovlar:
 - Tibbiyot va huquq bo'yicha javoblar ta'limiy xarakterga ega ekanini, aniq holatlar uchun mutaxassisga murojaat qilish lozimligini qisqa eslatib o'ting.
-- O'quvchilarning nazorat ishlari va imtihonlarida aldashga emas, mavzuni chuqur tushunishga yordam bering.`;
+- O'quvchilarning nazorat ishlari va imtihonlarida aldashga emas, mavzuni chuqur tushunishga yordam bering.
+- Siz rasm chizmaysiz va yaratmaysiz. Foydalanuvchi rasm so'rasa, sayt uni ochiq internetdan (Wikimedia Commons, Openverse) avtomatik qidirib beradi; agar so'rov sizga kelib qolsa, «… rasmini topib bering» deb yozish yoki 🖼 tugmasini bosish mumkinligini qisqa ayting.`;
 
 function subjectInstruction(subjectId) {
   const subject = SUBJECTS.find((s) => s.id === subjectId);
@@ -77,8 +78,8 @@ const HISTORY_CHAR_BUDGET = Number(process.env.HISTORY_CHAR_BUDGET) || (PROVIDER
 const WIKI_CHAR_BUDGET = Number(process.env.WIKI_CHAR_BUDGET) || (PROVIDER === "groq" ? 2500 : 8000);
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_PER_MINUTE) || 15;
-// Rasm yaratish qimmatroq — alohida, qattiqroq limit
-const IMAGE_RATE_LIMIT_MAX = Number(process.env.IMAGE_RATE_LIMIT_PER_MINUTE) || 4;
+// Rasm qidiruvi uchun alohida limit
+const IMAGE_RATE_LIMIT_MAX = Number(process.env.IMAGE_RATE_LIMIT_PER_MINUTE) || 10;
 const hits = new Map();
 const imageHits = new Map();
 const titleHits = new Map();
@@ -234,9 +235,8 @@ app.post("/api/chat", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Rasm yaratish (Gemini / ChatGPT)
-// ---------------------------------------------------------------------------
 // Suhbat sarlavhasi (yon paneldagi suhbatlar ro'yxati uchun)
+// ---------------------------------------------------------------------------
 app.post("/api/title", async (req, res) => {
   if (rateLimited(req.ip, titleHits, 10)) return res.status(429).json({ title: null });
   const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
@@ -252,28 +252,56 @@ app.post("/api/title", async (req, res) => {
   }
 });
 
-app.get("/api/features", (_req, res) => res.json({ images: imagesEnabled() }));
+// ---------------------------------------------------------------------------
+// Rasm qidirish: ochiq internetdan (Wikimedia Commons, Openverse)
+// ---------------------------------------------------------------------------
+app.get("/api/features", (_req, res) => res.json({ images: true }));
 
-app.post("/api/image", async (req, res) => {
-  if (!imagesEnabled()) {
-    return res.status(503).json({ error: "Rasm yaratish hozircha o'chirilgan." });
-  }
+// AI ishlamasa: so'rovdan "rasmini topib bering" kabi so'zlarni olib tashlab, qolganini qidiramiz
+const IMAGE_REQUEST_STEMS =
+  /^(rasm|surat|tasvir|foto|illyustratsiya|картинк|фото|изображени|рисун|найди|покажи|нарисуй|picture|image|photo)/i;
+const IMAGE_REQUEST_VERBS =
+  /^(top|ko['ʻ’`]?rsat|ber|chiz|izla|qidir|yubor|chiqar)(ib|ing|ish|sang|asiz|ing|gin|chi|ingiz|sangiz|ilsin)*$/i;
+const IMAGE_FILLER = new Set(
+  "iltimos menga bizga bir nechta va find show draw get please me some a an the of for".split(" "),
+);
+const fallbackImageQuery = (text) =>
+  text
+    .replace(/[^\p{L}\p{N}\s'ʻ’-]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w && !IMAGE_REQUEST_STEMS.test(w) && !IMAGE_REQUEST_VERBS.test(w) && !IMAGE_FILLER.has(w.toLowerCase()))
+    .map((w) => (w.length > 6 ? w.replace(/(larining|larning|ning)$/i, "") : w))
+    .filter((w) => w.length > 1)
+    .slice(0, 6)
+    .join(" ");
+
+app.post("/api/image-search", async (req, res) => {
   if (rateLimited(req.ip, imageHits, IMAGE_RATE_LIMIT_MAX)) {
     return res.status(429).json({ error: "Rasm so'rovlari juda ko'p. Iltimos, bir daqiqadan so'ng qayta urinib ko'ring." });
   }
   const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
-  if (!prompt) return res.status(400).json({ error: "Rasm tavsifini yozing." });
-  if (prompt.length > 2000) return res.status(400).json({ error: "Tavsif juda uzun (2 000 belgidan oshmasin)." });
+  if (!prompt) return res.status(400).json({ error: "Qanday rasm kerakligini yozing." });
+  if (prompt.length > 1000) return res.status(400).json({ error: "So'rov juda uzun (1 000 belgidan oshmasin)." });
 
   const abort = new AbortController();
   res.on("close", () => { if (!res.writableEnded) abort.abort(); });
   try {
-    const img = await generateImage(prompt, { signal: abort.signal });
-    res.json({ image: `data:${img.mime};base64,${img.data}`, text: img.text, source: img.source });
+    const english = await imageSearchQuery(prompt, abort.signal).catch((err) => {
+      console.warn("Rasm so'rovini tarjima qilib bo'lmadi:", err?.status, err?.message);
+      return null;
+    });
+    if (abort.signal.aborted) return;
+    const local = fallbackImageQuery(prompt);
+    const images = await searchImages([english, local], { signal: abort.signal });
+    if (abort.signal.aborted) return;
+    if (!images.length) {
+      return res.status(404).json({ error: "Afsuski, so'ralgan rasm ochiq manbalarda topilmadi. Boshqacharoq ifodalab ko'ring." });
+    }
+    res.json({ query: english || local, images });
   } catch (err) {
     if (abort.signal.aborted) return;
-    console.error("Rasm xatosi:", err?.status, err?.message);
-    res.status(err?.status === 429 ? 429 : 502).json({ error: imageErrorMessage(err) });
+    console.error("Rasm qidiruvi xatosi:", err?.status, err?.message);
+    res.status(502).json({ error: "Rasm qidirishda xatolik yuz berdi. Iltimos, birozdan so'ng qayta urinib ko'ring." });
   }
 });
 

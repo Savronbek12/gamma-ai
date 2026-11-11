@@ -251,6 +251,22 @@ button, input, textarea { font: inherit; color: inherit; }
 .bubble .gen-image figcaption { margin-top: 8px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .bubble .gen-image a { color: var(--link); font-weight: 700; text-decoration: none; }
 .bubble .gen-image a:hover { text-decoration: underline; }
+
+/* Internetdan topilgan rasmlar galereyasi */
+.bubble .gallery-head { margin: 0 0 10px; color: var(--muted); font-size: 13px; font-weight: 700; }
+.bubble .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.bubble .found-image {
+  margin: 0; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface-2); border-radius: 8px; box-shadow: var(--card-shadow);
+}
+.bubble .found-image a { display: block; aspect-ratio: 4 / 3; background: var(--code-bg); }
+.bubble .found-image img { display: block; width: 100%; height: 100%; object-fit: cover; transition: opacity .15s; }
+.bubble .found-image a:hover img { opacity: .85; }
+.bubble .found-image figcaption { padding: 7px 9px 8px; font-size: 12px; line-height: 1.35; color: var(--muted); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bubble .found-image figcaption strong { color: var(--text); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bubble .found-image figcaption span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bubble .found-image .src { color: var(--link); font-weight: 700; }
+@media (max-width: 520px) { .bubble .gallery { grid-template-columns: repeat(2, 1fr); } }
 .disclaimer { text-align: center; color: var(--muted); font-size: 12px; margin: 10px 16px 12px; }
 
 .backdrop { display: none; }

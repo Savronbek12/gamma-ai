@@ -51,6 +51,10 @@ function cleanMessages(list) {
     if (m.role === "assistant" && typeof m.image === "string" && m.image.startsWith("data:image/")) item.image = m.image;
     if (m.role === "assistant" && m.imageLost) item.imageLost = true;
     if (m.role === "assistant" && typeof m.imageSource === "string") item.imageSource = m.imageSource;
+    if (m.role === "assistant" && Array.isArray(m.images)) {
+      const images = cleanImages(m.images);
+      if (images.length) item.images = images;
+    }
     clean.push(item);
   }
   // Javobsiz qolgan oxirgi savolni olib tashlaymiz
@@ -182,7 +186,38 @@ function sourcesHtml(sources) {
   return `<div class="sources"><span>Wikipedia manbalari</span><ol>${items}</ol></div>`;
 }
 
-// ---------- Yaratilgan rasmlar ----------
+// ---------- Internetdan topilgan rasmlar ----------
+const isHttpsUrl = (u) => {
+  try { return new URL(String(u)).protocol === "https:"; } catch { return false; }
+};
+const str = (v, max) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
+function cleanImages(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter((x) => x && isHttpsUrl(x.thumb) && isHttpsUrl(x.page))
+    .slice(0, 8)
+    .map((x) => ({
+      thumb: x.thumb, page: x.page,
+      title: str(x.title, 140) || "Rasm", creator: str(x.creator, 80),
+      license: str(x.license, 40), source: str(x.source, 40),
+    }));
+}
+function galleryHtml(m) {
+  const items = m.images
+    .map((x) => {
+      const meta = [x.creator, x.license].filter(Boolean).map(escapeHtml).join(" · ");
+      return `<figure class="found-image">
+        <a href="${escapeHtml(x.page)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(x.title)}">
+          <img src="${escapeHtml(x.thumb)}" alt="${escapeHtml(x.title)}" loading="lazy" referrerpolicy="no-referrer"
+               onerror="this.closest('figure').remove()">
+        </a>
+        <figcaption><strong>${escapeHtml(x.title)}</strong>${meta ? `<span>${meta}</span>` : ""}<span class="src">${escapeHtml(x.source || "")}</span></figcaption>
+      </figure>`;
+    })
+    .join("");
+  return `<p class="gallery-head">Ochiq internetdan topilgan rasmlar — ustiga bosib, asl manbani oching:</p><div class="gallery">${items}</div>`;
+}
+
+// ---------- Avval yaratilgan rasmlar (eski suhbatlar uchun) ----------
 function imageHtml(src, prompt, source) {
   const caption = `<figcaption><span>${source ? escapeHtml(source) + " yaratgan rasm" : "Yaratilgan rasm"}</span><a href="${escapeHtml(src)}" download="gamma-ai-rasm.jpg">Yuklab olish</a></figcaption>`;
   return `<figure class="gen-image"><img src="${escapeHtml(src)}" alt="${escapeHtml(prompt || "Yaratilgan rasm")}" loading="lazy">${caption}</figure>`;
@@ -206,6 +241,7 @@ function addMessageEl(role, content, sources, msg) {
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   if (role === "user") bubble.textContent = content;
+  else if (msg && msg.images) bubble.innerHTML = galleryHtml(msg);
   else if (msg && (msg.image || msg.imageLost)) bubble.innerHTML = imageMessageHtml(msg);
   else bubble.innerHTML = content ? renderMarkdown(content) + sourcesHtml(sources) : "";
   wrap.appendChild(bubble);
@@ -343,48 +379,28 @@ function renderSuggestions() {
   }
 }
 
-// ---------- Rasm rejimi ----------
+// ---------- Rasm qidirish rejimi (ochiq internetdan) ----------
 const imageBtn = $("imageBtn");
 let imagesAvailable = false;
 let imageMode = false;
 
-// "Mushukning rasmini chizib bering", "нарисуй…", "draw a…" kabi so'rovlarni aniqlash
+// "Amir Temurning rasmini topib bering", "mushuk rasmini chiz", "найди фото…", "show me a picture of…" kabi so'rovlar
 const IMAGE_INTENT = [
-  /\b(rasm|rasmi|rasmini|rasmni|surat|surati|suratini|suratni|tasvir|tasviri|tasvirini|tasvirni|illyustratsiya|illyustratsiyasini)\b[^.?!]{0,60}\b(chiz|yarat|yasa|tayyorla|chiqar|generatsiya)/i,
-  /(нарисуй|нарисуйте|(сгенерируй|создай|сделай)\S*\s+(\S+\s+)?(картинк|изображени|рисун))/i,
-  /\b(draw|paint|(generate|create|make)\s+(me\s+)?an?\s+(image|picture|illustration|drawing))\b/i,
+  /\b(rasm|surat|tasvir|foto|fotosurat|illyustratsiya)(i|ni|ini|si|sini|lar|lari|larini|larni)?\s+(\p{L}+\s+)?(top|ko['ʻ’`]?rsat|chiz|yarat|izla|qidir|yubor|chiqar|ber)/iu,
+  /(нарисуй|(найди|покажи|сгенерируй|создай|сделай)\S*\s+(\S+\s+)?(картинк|фото|изображени|рисун))/i,
+  /\b(draw|paint|(find|show|get|generate|create|make)\s+(me\s+)?(an?\s+|some\s+)?(image|picture|photo|illustration|drawing)s?)\b/i,
 ];
 const wantsImage = (text) => IMAGE_INTENT.some((re) => re.test(text));
 
 function setImageMode(on) {
   imageMode = on && imagesAvailable;
   imageBtn.setAttribute("aria-pressed", String(imageMode));
-  inputEl.placeholder = imageMode ? "Rasm tavsifini yozing… (masalan: tog'lar orasidagi ko'l, akvarel uslubida)" : "Savolingizni yozing…";
+  inputEl.placeholder = imageMode ? "Qanday rasm kerak? (masalan: Registon maydoni, Samarqand)" : "Savolingizni yozing…";
 }
 imageBtn.addEventListener("click", () => {
   setImageMode(!imageMode);
   inputEl.focus();
 });
-
-// Rasmni brauzerda saqlash uchun kichraytiramiz (JPEG, eng katta tomoni 1024px)
-function compressImage(dataUrl, maxSide = 1024, quality = 0.88) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      try { resolve(canvas.toDataURL("image/jpeg", quality)); } catch { resolve(dataUrl); }
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
-  });
-}
 
 async function sendImage(text) {
   busy = true;
@@ -396,25 +412,26 @@ async function sendImage(text) {
   pushUserMessage(c, text);
   addMessageEl("user", text);
   const bubble = addMessageEl("assistant", "");
-  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div><p class="note">Rasm yaratilmoqda… (odatda 10–60 soniya)</p>';
+  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div><p class="note">Ochiq manbalardan rasm qidirilmoqda…</p>';
   scrollDown(true);
   controller = new AbortController();
 
-  let image = null;
-  let imageSource = null;
+  let images = null;
+  let query = "";
   let errorText = null;
   try {
-    const res = await fetch("/api/image", {
+    const res = await fetch("/api/image-search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: text }),
       signal: controller.signal,
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.image) throw new Error(data.error || "Rasm yaratilmadi.");
-    image = await compressImage(data.image);
-    imageSource = typeof data.source === "string" ? data.source : null;
+    images = cleanImages(data.images);
+    if (!res.ok || !images.length) throw new Error(data.error || "Rasm topilmadi.");
+    query = typeof data.query === "string" ? data.query : "";
   } catch (err) {
+    images = null;
     if (err.name !== "AbortError") errorText = err.message || "Tarmoq xatosi.";
   }
 
@@ -423,15 +440,18 @@ async function sendImage(text) {
   sendBtn.disabled = !inputEl.value.trim();
   if (chat !== c) return dropUnanswered(c); // foydalanuvchi boshqa suhbatga o'tdi
 
-  if (image) {
-    const msg = { role: "assistant", content: `Foydalanuvchi so'roviga ko'ra rasm yaratildi: «${text}».`, image };
-    if (imageSource) msg.imageSource = imageSource;
-    bubble.innerHTML = imageMessageHtml(msg);
+  if (images) {
+    const msg = {
+      role: "assistant",
+      content: `Foydalanuvchi so'roviga ko'ra ochiq internetdan ${images.length} ta rasm topildi: «${text}»${query ? ` (qidiruv: ${query})` : ""}.`,
+      images,
+    };
+    bubble.innerHTML = galleryHtml(msg);
     c.messages.push(msg);
     c.updatedAt = Date.now();
     save();
   } else {
-    bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Rasm yaratilmadi.")}</p>`;
+    bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Rasm topilmadi.")}</p>`;
     dropUnanswered(c);
     if (!isSaved(c)) chat = newDraft(c.subject);
   }

@@ -12,7 +12,7 @@ Sun'iy intellekt: **Groq** (bepul, standart, model `openai/gpt-oss-120b`), **Goo
 - Chap panelda suhbatlar ro'yxati: har bir suhbat mavzusiga qarab avtomatik nomlanadi va saqlanadi (qidirish, o'chirish mumkin)
 - Rasmiy, akademik uslub, "Siz" deb murojaat; foydalanuvchi tilida javob (standart — o'zbek tili)
 - Ochiq Wikipedia'dan (uz / ru / en) savolga oid ma'lumot avtomatik qidiriladi va modelga beriladi; manbalar javob ostida havola sifatida ko'rsatiladi (API kaliti kerak emas, `WIKIPEDIA=off` bilan o'chiriladi)
-- Rasm yaratish: 🖼 tugmasi yoki «… rasmini chizib bering» kabi so‘rov. Google Gemini (`GEMINI_API_KEY`, billing yoqilgan bo‘lishi kerak) yoki ChatGPT rasm modeli (`OPENAI_API_KEY`). Ikkalasi bo‘lsa, `IMAGE_PROVIDER` birinchisini tanlaydi, ikkinchisi zaxira. Kalit bo‘lmasa, 🖼 tugmasi ko‘rinmaydi
+- Rasm qidirish: 🖼 tugmasi yoki «… rasmini topib bering» kabi so‘rov — rasm ochiq internetdan (Wikimedia Commons, Openverse) topiladi, har birida muallif, litsenziya va asl manbaga havola ko‘rsatiladi (API kaliti kerak emas)
 - Javob real vaqtda yoziladi (streaming); Markdown, jadvallar va LaTeX formulalar qo'llab-quvvatlanadi
 - Yorug' / qorong'i mavzu, telefon uchun moslashgan dizayn
 - Suhbat tarixi foydalanuvchi brauzerida saqlanadi
@@ -65,7 +65,7 @@ location / {
 src/            server kodi
   server.js       Express server, API yo'llari, tizim ko'rsatmasi
   providers.js    AI provayderlari (Groq / Gemini / Claude), suhbat sarlavhasi
-  images.js       rasm yaratish (Gemini / ChatGPT)
+  imagesearch.js  ochiq internetdan rasm qidirish (Wikimedia Commons, Openverse)
   wikipedia.js    Wikipedia'dan ma'lumot qidirish
   subjects.js     30 ta fan ro'yxati
 public/         sayt (brauzer qismi): index.html, style.css, app.js

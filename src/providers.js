@@ -184,7 +184,8 @@ function cleanTitle(raw) {
   return t ? t.slice(0, 70) : null;
 }
 
-export async function generateTitle(text, signal) {
+// Qisqa, bir martalik javob (sarlavha, qidiruv so'rovi) — arzon va tez model bilan
+async function shortAnswer(system, text, signal) {
   const input = String(text).slice(0, 1500);
   if (PROVIDER === "groq") {
     groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
@@ -199,17 +200,17 @@ export async function generateTitle(text, signal) {
             model,
             temperature: 0.2,
             // gpt-oss avval qisqa o'ylaydi — fikrlash uchun ham joy qoldiramiz
-            max_completion_tokens: reasoning ? 400 : 40,
+            max_completion_tokens: reasoning ? 400 : 60,
             ...(reasoning ? { reasoning_effort: "low", reasoning_format: "hidden" } : {}),
-            messages: [{ role: "system", content: TITLE_SYSTEM }, { role: "user", content: input }],
+            messages: [{ role: "system", content: system }, { role: "user", content: input }],
           },
           { signal },
         );
-        const title = cleanTitle(r.choices?.[0]?.message?.content);
-        if (title) return title;
+        const out = r.choices?.[0]?.message?.content;
+        if (out && out.trim()) return out;
       } catch (err) {
         if (signal?.aborted || err?.status === 429) throw err;
-        console.warn(`Sarlavha modeli ${model} xatosi:`, err?.status, err?.message);
+        console.warn(`Qisqa javob modeli ${model} xatosi:`, err?.status, err?.message);
         lastErr = err;
       }
     }
@@ -221,19 +222,38 @@ export async function generateTitle(text, signal) {
     const r = await gemini.models.generateContent({
       model: process.env.TITLE_MODEL || MODEL,
       contents: [{ role: "user", parts: [{ text: input }] }],
-      config: { systemInstruction: TITLE_SYSTEM, abortSignal: signal },
+      config: { systemInstruction: system, abortSignal: signal },
     });
-    return cleanTitle(r.text);
+    return r.text;
   }
   claude ??= new Anthropic();
   const r = await claude.messages.create(
     {
       model: process.env.TITLE_MODEL || "claude-haiku-5-5",
-      max_tokens: 60,
-      system: TITLE_SYSTEM,
+      max_tokens: 80,
+      system,
       messages: [{ role: "user", content: input }],
     },
     { signal },
   );
-  return cleanTitle(r.content.find((b) => b.type === "text")?.text);
+  return r.content.find((b) => b.type === "text")?.text;
+}
+
+export async function generateTitle(text, signal) {
+  return cleanTitle(await shortAnswer(TITLE_SYSTEM, text, signal));
+}
+
+// ---------------------------------------------------------------------------
+// Rasm qidiruvi: foydalanuvchi so'rovidan inglizcha qisqa qidiruv so'rovi
+// ---------------------------------------------------------------------------
+const IMAGE_QUERY_SYSTEM =
+  "The user asks (in any language, usually Uzbek) to find a picture. Write a short English image-search query " +
+  "(2-5 words) naming exactly what should be in the picture. Keep proper names (people, places) as they are " +
+  "commonly written in English. Output only the query, without quotes or explanations.";
+
+export async function imageSearchQuery(text, signal) {
+  const raw = await shortAnswer(IMAGE_QUERY_SYSTEM, text, signal);
+  const line = String(raw || "").split(/\r?\n/).map((x) => x.trim()).find(Boolean) || "";
+  const q = line.replace(/^(query|search)\s*:\s*/i, "").replace(/^["'«»“”*\s]+|["'«»“”*.!?\s]+$/g, "").trim();
+  return q ? q.slice(0, 100) : null;
 }
