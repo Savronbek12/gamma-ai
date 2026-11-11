@@ -188,16 +188,33 @@ export async function generateTitle(text, signal) {
   const input = String(text).slice(0, 1500);
   if (PROVIDER === "groq") {
     groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
-    const r = await groq.chat.completions.create(
-      {
-        model: process.env.TITLE_MODEL || "llama-3.1-8b-instant",
-        temperature: 0.2,
-        max_completion_tokens: 40,
-        messages: [{ role: "system", content: TITLE_SYSTEM }, { role: "user", content: input }],
-      },
-      { signal },
-    );
-    return cleanTitle(r.choices?.[0]?.message?.content);
+    // Birinchi model ishlamasa (o'chirilgan/nomi o'zgargan), keyingisi sinaladi; oxirgisi — asosiy suhbat modeli
+    const models = [...new Set([process.env.TITLE_MODEL, "openai/gpt-oss-20b", MODEL].filter(Boolean))];
+    let lastErr = null;
+    for (const model of models) {
+      const reasoning = /gpt-oss/i.test(model);
+      try {
+        const r = await groq.chat.completions.create(
+          {
+            model,
+            temperature: 0.2,
+            // gpt-oss avval qisqa o'ylaydi — fikrlash uchun ham joy qoldiramiz
+            max_completion_tokens: reasoning ? 400 : 40,
+            ...(reasoning ? { reasoning_effort: "low", reasoning_format: "hidden" } : {}),
+            messages: [{ role: "system", content: TITLE_SYSTEM }, { role: "user", content: input }],
+          },
+          { signal },
+        );
+        const title = cleanTitle(r.choices?.[0]?.message?.content);
+        if (title) return title;
+      } catch (err) {
+        if (signal?.aborted || err?.status === 429) throw err;
+        console.warn(`Sarlavha modeli ${model} xatosi:`, err?.status, err?.message);
+        lastErr = err;
+      }
+    }
+    if (lastErr) throw lastErr;
+    return null;
   }
   if (PROVIDER === "gemini") {
     gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
