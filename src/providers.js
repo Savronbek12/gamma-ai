@@ -248,8 +248,10 @@ export async function generateTitle(text, signal) {
 // ---------------------------------------------------------------------------
 const IMAGE_QUERY_SYSTEM =
   "The user asks (in any language, usually Uzbek) to find a picture. Write a short English image-search query " +
-  "(2-5 words) naming exactly what should be in the picture. Keep proper names (people, places) as they are " +
-  "commonly written in English. Output only the query, without quotes or explanations.";
+  "(1-4 words) naming exactly what should be in the picture. Write proper names (people, places, things) " +
+  "the way the English Wikipedia article title spells them (e.g. Amir Temur → Timur, Registon → Registan, " +
+  "Toshkent teleminorasi → Tashkent Tower). Do not add generic words like photo, picture, image, building. " +
+  "Output only the query, without quotes or explanations.";
 
 export async function imageSearchQuery(text, signal) {
   const raw = await shortAnswer(IMAGE_QUERY_SYSTEM, text, signal);

@@ -19,39 +19,62 @@ async function getJson(url, signal) {
   return res.json();
 }
 
-async function searchCommons(query, signal) {
+const IMAGEINFO = {
+  prop: "imageinfo",
+  iiprop: "url|extmetadata|mime",
+  iiurlwidth: "640",
+  iiextmetadatafilter: "Artist|LicenseShortName|ObjectName",
+};
+
+function commonsUrl(params) {
   const url = new URL("https://commons.wikimedia.org/w/api.php");
+  for (const [k, v] of Object.entries({ action: "query", format: "json", formatversion: "2", ...IMAGEINFO, ...params })) {
+    url.searchParams.set(k, v);
+  }
+  return url;
+}
+
+function fromCommonsPage(p, source = "Wikimedia Commons") {
+  const info = p.imageinfo?.[0];
+  if (!info?.thumburl || !/^image\/(jpeg|png|webp|gif)$/.test(info.mime || "")) return null;
+  const meta = info.extmetadata || {};
+  return {
+    thumb: info.thumburl,
+    page: info.descriptionurl,
+    title: stripHtml(meta.ObjectName?.value) || p.title.replace(/^File:/, "").replace(/\.[a-z0-9]+$/i, ""),
+    creator: stripHtml(meta.Artist?.value).slice(0, 80) || null,
+    license: stripHtml(meta.LicenseShortName?.value) || null,
+    source,
+  };
+}
+
+async function searchCommons(query, signal) {
+  const data = await getJson(commonsUrl({ generator: "search", gsrsearch: `filetype:bitmap ${query}`, gsrnamespace: "6", gsrlimit: "10" }), signal);
+  return (data.query?.pages || [])
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    .map((p) => fromCommonsPage(p))
+    .filter(Boolean);
+}
+
+// Mavzuga oid Wikipedia maqolasining asosiy rasmi (masalan, "Timur" → Amir Temur portreti).
+// Odatda eng aniq natija shu bo'ladi. Faqat ochiq litsenziyali rasmlar (pilicense=free).
+async function wikipediaLeadImage(lang, query, signal) {
+  const url = new URL(`https://${lang}.wikipedia.org/w/api.php`);
   const params = {
-    action: "query",
-    format: "json",
-    formatversion: "2",
-    generator: "search",
-    gsrsearch: `filetype:bitmap ${query}`,
-    gsrnamespace: "6",
-    gsrlimit: "10",
-    prop: "imageinfo",
-    iiprop: "url|extmetadata|mime",
-    iiurlwidth: "640",
-    iiextmetadatafilter: "Artist|LicenseShortName|ObjectName",
+    action: "query", format: "json", formatversion: "2",
+    generator: "search", gsrsearch: query, gsrlimit: "3",
+    prop: "pageimages", piprop: "name", pilicense: "free",
   };
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   const data = await getJson(url, signal);
-  return (data.query?.pages || [])
-    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
-    .map((p) => {
-      const info = p.imageinfo?.[0];
-      if (!info?.thumburl || !/^image\/(jpeg|png|webp|gif)$/.test(info.mime || "")) return null;
-      const meta = info.extmetadata || {};
-      return {
-        thumb: info.thumburl,
-        page: info.descriptionurl,
-        title: stripHtml(meta.ObjectName?.value) || p.title.replace(/^File:/, "").replace(/\.[a-z0-9]+$/i, ""),
-        creator: stripHtml(meta.Artist?.value).slice(0, 80) || null,
-        license: stripHtml(meta.LicenseShortName?.value) || null,
-        source: "Wikimedia Commons",
-      };
-    })
-    .filter(Boolean);
+  const pages = (data.query?.pages || []).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  const top = pages[0];
+  if (!top?.pageimage || /\((disambiguation|maʼnolari|ma'nolari|значения)\)/i.test(top.title)) return null;
+  const info = await getJson(commonsUrl({ titles: `File:${top.pageimage}` }), signal);
+  const page = info.query?.pages?.[0];
+  if (!page || page.missing) return null;
+  const item = fromCommonsPage(page, `Wikipedia · ${top.title}`);
+  return item && { ...item, title: top.title };
 }
 
 async function searchOpenverse(query, signal) {
@@ -77,22 +100,31 @@ const isHttps = (u) => {
 };
 
 /**
- * @param {string} query inglizcha qidiruv so'rovi (bir nechta variant bo'lishi mumkin)
+ * @param {{ english?: string|null, local?: string|null }} q — inglizcha (AI) va asl tildagi qidiruv so'rovlari
  * @returns {Promise<{thumb:string,page:string,title:string,creator:string|null,license:string|null,source:string}[]>}
  */
-export async function searchImages(queries, { signal } = {}) {
-  const list = [...new Set(queries.map((q) => String(q || "").trim()).filter(Boolean))].slice(0, 2);
+export async function searchImages({ english, local }, { signal } = {}) {
+  const list = [...new Set([english, local].map((q) => String(q || "").trim()).filter(Boolean))];
   const results = [];
   const seen = new Set();
   const add = (items) => {
     for (const it of items) {
-      if (results.length >= MAX_RESULTS) return;
-      if (!isHttps(it.thumb) || !isHttps(it.page) || seen.has(it.page)) continue;
-      seen.add(it.page);
+      if (!it || results.length >= MAX_RESULTS) return;
+      if (!isHttps(it.thumb) || !isHttps(it.page) || seen.has(it.thumb.split("/").pop())) continue;
+      seen.add(it.thumb.split("/").pop());
       results.push(it);
     }
   };
   let lastErr = null;
+
+  // 1) Wikipedia maqolalarining asosiy rasmlari (inglizcha va o'zbekcha)
+  const lead = await Promise.all([
+    english ? wikipediaLeadImage("en", english, signal).catch((e) => { lastErr = e; return null; }) : null,
+    local ? wikipediaLeadImage("uz", local, signal).catch((e) => { lastErr = e; return null; }) : null,
+  ]);
+  add(lead);
+
+  // 2) Commons va Openverse qidiruvi
   for (const q of list) {
     const [commons, openverse] = await Promise.all([
       searchCommons(q, signal).catch((e) => { lastErr = e; return []; }),

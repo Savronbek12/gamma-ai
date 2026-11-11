@@ -292,7 +292,7 @@ app.post("/api/image-search", async (req, res) => {
     });
     if (abort.signal.aborted) return;
     const local = fallbackImageQuery(prompt);
-    const images = await searchImages([english, local], { signal: abort.signal });
+    const images = await searchImages({ english, local }, { signal: abort.signal });
     if (abort.signal.aborted) return;
     if (!images.length) {
       return res.status(404).json({ error: "Afsuski, so'ralgan rasm ochiq manbalarda topilmadi. Boshqacharoq ifodalab ko'ring." });
