@@ -1,88 +1,101 @@
-// Rasm yaratish: GEMINI_API_KEY bo'lsa — Google Gemini; bo'lmasa yoki Gemini ishlamasa —
-// bepul, kalitsiz Pollinations.ai (IMAGE_FALLBACK=off bilan o'chiriladi).
+// Rasm yaratish: Google Gemini (GEMINI_API_KEY) yoki OpenAI / ChatGPT (OPENAI_API_KEY).
+// Ikkala kalit ham bo'lsa, IMAGE_PROVIDER (gemini | openai) birinchi sinaladiganini tanlaydi,
+// birinchisi ishlamasa ikkinchisi sinab ko'riladi. Kalit bo'lmasa, rasm yaratish o'chiq.
 import { GoogleGenAI } from "@google/genai";
-import Groq from "groq-sdk";
 
-// Birinchisi ishlamasa (model o'chirilgan/nomi o'zgargan), keyingisi sinab ko'riladi
-const CANDIDATES = [process.env.GEMINI_IMAGE_MODEL, "gemini-3.1-flash-image", "gemini-2.5-flash-image"].filter(Boolean);
+const hasGemini = () => Boolean(process.env.GEMINI_API_KEY);
+const hasOpenAI = () => Boolean(process.env.OPENAI_API_KEY);
+export const imagesEnabled = () => hasGemini() || hasOpenAI();
 
-let client = null;
-let workingModel = null; // muvaffaqiyatli ishlagan model eslab qolinadi
-
-const fallbackOn = () => (process.env.IMAGE_FALLBACK || "on").toLowerCase() !== "off";
-export const imagesEnabled = () => Boolean(process.env.GEMINI_API_KEY) || fallbackOn();
-
-// ---------- Zaxira: Pollinations.ai (kalit kerak emas) ----------
-let groq = null;
-// Pollinations modeli inglizcha tavsifni yaxshiroq tushunadi — Groq bo'lsa, tarjima qilamiz
-async function toEnglish(prompt, signal) {
-  if (!process.env.GROQ_API_KEY) return prompt;
-  try {
-    groq ??= new Groq({ apiKey: process.env.GROQ_API_KEY });
-    const r = await groq.chat.completions.create(
-      {
-        model: process.env.IMAGE_PROMPT_MODEL || "llama-3.1-8b-instant",
-        temperature: 0.2,
-        max_tokens: 300,
-        messages: [
-          { role: "system", content: "Translate the user's image description into a concise, vivid English image-generation prompt. Output only the prompt, nothing else." },
-          { role: "user", content: prompt },
-        ],
-      },
-      { signal },
-    );
-    const out = r.choices?.[0]?.message?.content?.trim();
-    return out ? out.slice(0, 1000) : prompt;
-  } catch {
-    return prompt;
-  }
+function providerOrder() {
+  const order = (process.env.IMAGE_PROVIDER || "gemini").toLowerCase() === "openai" ? ["openai", "gemini"] : ["gemini", "openai"];
+  return order.filter((p) => (p === "gemini" ? hasGemini() : hasOpenAI()));
 }
 
-const sleep = (ms, signal) =>
-  new Promise((resolve, reject) => {
-    const t = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => { clearTimeout(t); reject(signal.reason); }, { once: true });
+const fullPrompt = (prompt) =>
+  `Quyidagi tavsif bo'yicha yuqori sifatli rasm yarating. Rasmda yozuv kerak bo'lsa, uni aniq va xatosiz yozing.\n\nTavsif: ${prompt}`;
+
+const blockedError = () => Object.assign(new Error("blocked"), { code: "blocked" });
+
+/**
+ * @returns {Promise<{ mime: string, data: string, text: string, source: string }>} data — base64
+ */
+export async function generateImage(prompt, { signal } = {}) {
+  const providers = providerOrder();
+  if (!providers.length) throw Object.assign(new Error("no image provider"), { code: "disabled" });
+  let lastErr = null;
+  for (const p of providers) {
+    try {
+      return p === "gemini" ? await generateGemini(prompt, signal) : await generateOpenAI(prompt, signal);
+    } catch (err) {
+      // Taqiqlangan tavsifni boshqa xizmat orqali chetlab o'tmaymiz
+      if (err?.code === "blocked" || signal?.aborted) throw err;
+      console.error(`${p} rasm xatosi:`, err?.status, err?.message);
+      lastErr = Object.assign(err, { provider: p });
+    }
+  }
+  throw lastErr;
+}
+
+// ---------- OpenAI (ChatGPT rasm modeli) ----------
+const OPENAI_CANDIDATES = [process.env.OPENAI_IMAGE_MODEL, "gpt-image-1.5", "gpt-image-1"].filter(Boolean);
+let openaiModel = null; // muvaffaqiyatli ishlagan model eslab qolinadi
+
+async function openaiRequest(model, prompt, signal) {
+  const timeout = AbortSignal.timeout(150_000);
+  const res = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+    body: JSON.stringify({
+      model,
+      prompt: fullPrompt(prompt),
+      n: 1,
+      size: "1024x1024",
+      quality: process.env.OPENAI_IMAGE_QUALITY || "medium",
+      output_format: "jpeg",
+    }),
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
-
-// Bepul tarif: bitta IP'dan ~45 soniyada 1 rasm. So'rovlarni navbatga qo'yamiz va limitda kutib qayta urinamiz.
-let queue = Promise.resolve();
-const MAX_WAIT_MS = 60_000;
-
-async function fetchPollinations(url, signal) {
-  for (let attempt = 0; ; attempt++) {
-    const timeout = AbortSignal.timeout(120_000);
-    const res = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
-    const mime = res.headers.get("content-type") || "";
-    if (res.ok && mime.startsWith("image/")) {
-      return { mime, data: Buffer.from(await res.arrayBuffer()).toString("base64") };
-    }
-    const body = await res.text().catch(() => "");
-    const limited = res.status === 402 || res.status === 429;
-    const waitMs = limited
-      ? (Number(/retry after (\d+)/i.exec(body)?.[1] ?? res.headers.get("retry-after") ?? 45) + 1) * 1000
-      : 3000;
-    if (attempt < 2 && (limited || res.status >= 500) && waitMs <= MAX_WAIT_MS) {
-      await sleep(waitMs, signal);
-      continue;
-    }
-    throw Object.assign(new Error(`Pollinations ${res.status}: ${body.slice(0, 200)}`), { status: limited ? 429 : 502 });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const e = body?.error || {};
+    if (e.code === "moderation_blocked" || /safety system|moderation/i.test(e.message || "")) throw blockedError();
+    throw Object.assign(new Error(e.message || `OpenAI ${res.status}`), { status: res.status, code: e.code, type: e.type });
   }
+  const data = body?.data?.[0]?.b64_json;
+  if (!data) throw Object.assign(new Error("no image"), { code: "no_image" });
+  return { mime: "image/jpeg", data, text: "", source: "ChatGPT" };
 }
 
-async function generatePollinations(prompt, signal) {
-  const english = await toEnglish(prompt, signal);
-  const seed = Math.floor(Math.random() * 1e9);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(english)}?width=1024&height=1024&nologo=true&model=flux&seed=${seed}`;
-  const job = queue.then(() => fetchPollinations(url, signal));
-  queue = job.catch(() => {});
-  const { mime, data } = await job;
-  return { mime, data, text: "", source: "Pollinations" };
+const openaiModelMissing = (err) =>
+  err?.code === "model_not_found" || err?.status === 404 || /model .*(does not exist|not found)|invalid model/i.test(String(err?.message));
+
+async function generateOpenAI(prompt, signal) {
+  const models = openaiModel ? [openaiModel] : OPENAI_CANDIDATES;
+  let lastErr = null;
+  for (const model of models) {
+    try {
+      const out = await openaiRequest(model, prompt, signal);
+      openaiModel = model;
+      return out;
+    } catch (err) {
+      if (!openaiModelMissing(err)) throw err;
+      lastErr = err;
+    }
+  }
+  openaiModel = null;
+  throw lastErr;
 }
 
-const isModelMissing = (err) => err?.status === 404 || /not found|is not supported|unknown model/i.test(String(err?.message));
+// ---------- Google Gemini ----------
+const GEMINI_CANDIDATES = [process.env.GEMINI_IMAGE_MODEL, "gemini-3.1-flash-image", "gemini-2.5-flash-image"].filter(Boolean);
+let client = null;
+let geminiModel = null;
+
+const geminiModelMissing = (err) => err?.status === 404 || /not found|is not supported|unknown model/i.test(String(err?.message));
 
 // Ro'yxatdagi modellar ishlamasa, API'dan rasm chiqaradigan Gemini modelini topamiz
-async function discoverModel() {
+async function discoverGeminiModel() {
   try {
     const pager = await client.models.list();
     for await (const m of pager) {
@@ -93,75 +106,66 @@ async function discoverModel() {
   return null;
 }
 
-async function generateWith(model, prompt, signal) {
+async function geminiRequest(model, prompt, signal) {
   const res = await client.models.generateContent({
     model,
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    contents: [{ role: "user", parts: [{ text: fullPrompt(prompt) }] }],
     config: { responseModalities: ["TEXT", "IMAGE"], abortSignal: signal },
   });
   const parts = res.candidates?.[0]?.content?.parts || [];
   const image = parts.find((p) => p.inlineData?.data);
   const text = parts.filter((p) => p.text && !p.thought).map((p) => p.text).join("\n").trim();
   const blocked = res.promptFeedback?.blockReason || ["SAFETY", "PROHIBITED_CONTENT", "IMAGE_SAFETY", "BLOCKLIST"].includes(res.candidates?.[0]?.finishReason);
-  return { image, text, blocked };
-}
-
-/**
- * @returns {Promise<{ mime: string, data: string, text: string }>} data — base64
- */
-export async function generateImage(prompt, { signal } = {}) {
-  if (!process.env.GEMINI_API_KEY) return generatePollinations(prompt, signal);
-  try {
-    return await generateGemini(prompt, signal);
-  } catch (err) {
-    // Taqiqlangan tavsifni zaxira orqali chetlab o'tmaymiz
-    if (err?.code === "blocked" || signal?.aborted || !fallbackOn()) throw err;
-    console.error("Gemini rasm xatosi, zaxiraga o'tilmoqda:", err?.status, err?.message);
-    return generatePollinations(prompt, signal);
-  }
+  geminiModel = model;
+  if (!image) throw blocked ? blockedError() : Object.assign(new Error("no image"), { code: "no_image" });
+  return { mime: image.inlineData.mimeType || "image/png", data: image.inlineData.data, text, source: "Gemini" };
 }
 
 async function generateGemini(prompt, signal) {
   client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  const fullPrompt = `Quyidagi tavsif bo'yicha yuqori sifatli rasm yarating. Rasmda yozuv kerak bo'lsa, uni aniq va xatosiz yozing.\n\nTavsif: ${prompt}`;
-
-  const tryModel = async (model) => {
-    const out = await generateWith(model, fullPrompt, signal);
-    workingModel = model;
-    if (!out.image) {
-      throw Object.assign(new Error(out.blocked ? "blocked" : "no image"), { code: out.blocked ? "blocked" : "no_image" });
-    }
-    return { mime: out.image.inlineData.mimeType || "image/png", data: out.image.inlineData.data, text: out.text, source: "Gemini" };
-  };
-
-  const models = workingModel ? [workingModel] : CANDIDATES;
+  const models = geminiModel ? [geminiModel] : GEMINI_CANDIDATES;
   let lastErr = null;
   for (const model of models) {
     try {
-      return await tryModel(model);
+      return await geminiRequest(model, prompt, signal);
     } catch (err) {
-      if (!isModelMissing(err)) throw err;
+      if (!geminiModelMissing(err)) throw err;
       lastErr = err;
     }
   }
-  // Hech biri topilmadi — API'dan mos modelni qidiramiz
-  workingModel = null;
-  const found = await discoverModel();
-  if (found && !models.includes(found)) return tryModel(found);
+  geminiModel = null;
+  const found = await discoverGeminiModel();
+  if (found && !models.includes(found)) return geminiRequest(found, prompt, signal);
   throw lastErr;
 }
 
+// ---------- Xatolarni tushunarli matnga aylantirish ----------
 export function imageErrorMessage(err) {
   if (err?.code === "blocked") return "Kechirasiz, ushbu tavsif bo'yicha rasm yaratib bo'lmaydi. Iltimos, tavsifni o'zgartiring.";
   if (err?.code === "no_image") return "Rasm yaratilmadi. Iltimos, tavsifni aniqroq yozib qayta urinib ko'ring.";
+  if (err?.code === "disabled") return "Rasm yaratish hozircha o'chirilgan.";
   const status = err?.status;
   const msg = String(err?.message || "");
-  if (status === 429 || /quota|RESOURCE_EXHAUSTED/i.test(msg)) {
-    return /limit: 0|free_tier/i.test(msg)
-      ? "Rasm yaratish Gemini bepul tarifida mavjud emas — Google AI Studio'da to'lov (billing) yoqilishi kerak."
-      : "Rasm yaratish limiti tugadi. Iltimos, birozdan so'ng qayta urinib ko'ring.";
+  const openai = err?.provider === "openai";
+
+  if (openai) {
+    if (err?.code === "insufficient_quota" || err?.code === "billing_hard_limit_reached" || /billing|quota/i.test(msg)) {
+      return "ChatGPT (OpenAI) hisobida mablag' yo'q — platform.openai.com'da balansni to'ldirish kerak.";
+    }
+    if (status === 429) return "Rasm yaratish limiti tugadi. Iltimos, birozdan so'ng qayta urinib ko'ring.";
+    if (status === 401) return "Rasm xizmati sozlanmagan: OPENAI_API_KEY noto'g'ri.";
+    if (status === 403 && /verif/i.test(msg)) {
+      return "OpenAI rasm modeli uchun tashkilotni tasdiqlash (Organization verification) kerak — platform.openai.com sozlamalarida.";
+    }
+    if (status === 403) return "OpenAI kaliti rasm modeliga ruxsatga ega emas.";
+  } else {
+    if (status === 429 || /quota|RESOURCE_EXHAUSTED/i.test(msg)) {
+      return /limit: 0|free_tier/i.test(msg)
+        ? "Rasm yaratish Gemini bepul tarifida mavjud emas — Google AI Studio'da to'lov (billing) yoqilishi kerak."
+        : "Rasm yaratish limiti tugadi. Iltimos, birozdan so'ng qayta urinib ko'ring.";
+    }
+    if (status === 401 || status === 403 || /api key/i.test(msg)) return "Rasm xizmati sozlanmagan: GEMINI_API_KEY noto'g'ri.";
+    if (status === 400 && /location|region|not available/i.test(msg)) return "Rasm yaratish ushbu hududda mavjud emas.";
   }
-  if (status === 401 || status === 403 || /api key/i.test(msg)) return "Rasm xizmati sozlanmagan: GEMINI_API_KEY noto'g'ri yoki ko'rsatilmagan.";
-  if (status === 400 && /location|region|not available/i.test(msg)) return "Rasm yaratish ushbu hududda mavjud emas.";
   return "Rasm yaratishda xatolik yuz berdi. Iltimos, birozdan so'ng qayta urinib ko'ring.";
 }

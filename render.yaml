@@ -16,6 +16,8 @@ services:
       - key: GROQ_API_KEY
         sync: false   # Render panelida qo'lda kiritiladi (maxfiy)
       - key: GEMINI_API_KEY
-        sync: false   # rasm yaratish uchun (ixtiyoriy)
+        sync: false   # rasm yaratish uchun (ixtiyoriy, billing kerak)
+      - key: OPENAI_API_KEY
+        sync: false   # rasm yaratish uchun — ChatGPT (ixtiyoriy)
       - key: RATE_LIMIT_PER_MINUTE
         value: "15"

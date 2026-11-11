@@ -5,51 +5,120 @@ const chatEl = $("chat");
 const welcomeEl = $("welcome");
 const inputEl = $("input");
 const sendBtn = $("sendBtn");
-const subjectsEl = $("subjects");
+const chatListEl = $("chatList");
 
-const STORAGE_KEY = "gamma-ai-state-v1";
-const state = { subject: null, messages: [] };
-let subjects = [];
+// ---------- Suhbatlar (faqat shu brauzerda saqlanadi) ----------
+// Har bir suhbat: { id, title, titlePending, subject, messages, updatedAt }
+const STORAGE_KEY = "gamma-ai-chats-v2";
+const OLD_STORAGE_KEY = "gamma-ai-state-v1";
+const store = { chats: [], currentId: null };
+let chat = newDraft(); // joriy suhbat (hali saqlanmagan bo'lishi mumkin)
 let busy = false;
 let controller = null;
 
-// ---------- Saqlash (faqat shu brauzerda) ----------
+function newDraft(subject = null) {
+  return { id: null, title: null, titlePending: false, subject, messages: [], updatedAt: 0 };
+}
+const newId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+const isSaved = (c) => store.chats.includes(c);
+
 function save() {
-  // Rasmlar joy egallaydi: xotira to'lsa, eng eski rasmlardan boshlab o'chiramiz (matni qoladi)
+  store.currentId = isSaved(chat) ? chat.id : null;
+  // Rasmlar joy egallaydi: xotira to'lsa, eng eski suhbatlardagi rasmlardan boshlab o'chiramiz (matni qoladi)
   for (;;) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
       return;
     } catch {
-      const old = state.messages.find((m) => m.image);
-      if (!old) return;
-      delete old.image;
-      old.imageLost = true;
+      const oldest = [...store.chats].sort((a, b) => a.updatedAt - b.updatedAt);
+      const msg = oldest.flatMap((c) => c.messages).find((m) => m.image);
+      if (!msg) return;
+      delete msg.image;
+      msg.imageLost = true;
     }
   }
 }
+
+// Faqat to'g'ri ketma-ketlikdagi (savol, javob, savol, javob...) xabarlarni qoldiramiz
+function cleanMessages(list) {
+  const clean = [];
+  for (const m of Array.isArray(list) ? list : []) {
+    if (!m || typeof m.content !== "string" || !m.content.trim()) continue;
+    const expected = clean.length % 2 === 0 ? "user" : "assistant";
+    if (m.role !== expected) continue;
+    const item = { role: m.role, content: m.content };
+    if (m.role === "assistant" && Array.isArray(m.sources)) item.sources = m.sources;
+    if (m.role === "assistant" && typeof m.image === "string" && m.image.startsWith("data:image/")) item.image = m.image;
+    if (m.role === "assistant" && m.imageLost) item.imageLost = true;
+    if (m.role === "assistant" && typeof m.imageSource === "string") item.imageSource = m.imageSource;
+    clean.push(item);
+  }
+  // Javobsiz qolgan oxirgi savolni olib tashlaymiz
+  if (clean.at(-1)?.role === "user") clean.pop();
+  return clean;
+}
+
+const provisionalTitle = (text) => {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > 48 ? t.slice(0, 46).trimEnd() + "…" : t;
+};
+
 function load() {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-    if (raw && Array.isArray(raw.messages)) {
-      state.subject = raw.subject || null;
-      // Faqat to'g'ri ketma-ketlikdagi (savol, javob, savol, javob...) xabarlarni qoldiramiz
-      const clean = [];
-      for (const m of raw.messages) {
-        if (!m || typeof m.content !== "string" || !m.content.trim()) continue;
-        const expected = clean.length % 2 === 0 ? "user" : "assistant";
-        if (m.role !== expected) continue;
-        const item = { role: m.role, content: m.content };
-        if (m.role === "assistant" && Array.isArray(m.sources)) item.sources = m.sources;
-        if (m.role === "assistant" && typeof m.image === "string" && m.image.startsWith("data:image/")) item.image = m.image;
-        if (m.role === "assistant" && m.imageLost) item.imageLost = true;
-        if (m.role === "assistant" && typeof m.imageSource === "string") item.imageSource = m.imageSource;
-        clean.push(item);
+    if (raw && Array.isArray(raw.chats)) {
+      for (const c of raw.chats) {
+        const messages = cleanMessages(c?.messages);
+        if (!messages.length) continue;
+        store.chats.push({
+          id: typeof c.id === "string" ? c.id : newId(),
+          title: typeof c.title === "string" && c.title ? c.title : provisionalTitle(messages[0].content),
+          titlePending: !!c.titlePending,
+          subject: typeof c.subject === "string" ? c.subject : null,
+          messages,
+          updatedAt: Number(c.updatedAt) || 0,
+        });
       }
-      // Javobsiz qolgan oxirgi savolni olib tashlaymiz
-      if (clean.at(-1)?.role === "user") clean.pop();
-      state.messages = clean;
+      store.currentId = raw.currentId || null;
+    } else {
+      // Eski versiyadagi yagona suhbatni ro'yxatga ko'chiramiz
+      const old = JSON.parse(localStorage.getItem(OLD_STORAGE_KEY) || "null");
+      const messages = cleanMessages(old?.messages);
+      if (messages.length) {
+        store.chats.push({
+          id: newId(), title: provisionalTitle(messages[0].content), titlePending: true,
+          subject: old.subject || null, messages, updatedAt: Date.now(),
+        });
+        store.currentId = store.chats[0].id;
+      }
     }
+  } catch {}
+  chat = store.chats.find((c) => c.id === store.currentId) || newDraft();
+  save();
+  try { localStorage.removeItem(OLD_STORAGE_KEY); } catch {}
+}
+
+// Birinchi savol asosida mavzuga mos sarlavha so'raymiz
+async function requestTitle(c) {
+  const first = c.messages.find((m) => m.role === "user");
+  if (!first) return;
+  try {
+    const res = await fetch("/api/title", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: first.content }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!isSaved(c)) return;
+    if (res.ok && typeof data.title === "string" && data.title.trim()) {
+      c.title = data.title.trim().slice(0, 70);
+      c.titlePending = false;
+    } else if (res.status !== 429 && res.status < 500) {
+      c.titlePending = false; // qayta so'rab foyda yo'q — vaqtinchalik sarlavha qoladi
+    }
+    save();
+    renderChats();
+    updateCurrent();
   } catch {}
 }
 
@@ -113,7 +182,6 @@ function sourcesHtml(sources) {
   return `<div class="sources"><span>Wikipedia manbalari:</span><ol>${items}</ol></div>`;
 }
 
-// ---------- Xabarlarni chizish ----------
 // ---------- Yaratilgan rasmlar ----------
 function imageHtml(src, prompt, source) {
   const caption = `<figcaption><span>${source ? escapeHtml(source) + " yaratgan rasm" : "Yaratilgan rasm"}</span><a href="${escapeHtml(src)}" download="gamma-ai-rasm.jpg">Yuklab olish</a></figcaption>`;
@@ -124,6 +192,7 @@ function imageMessageHtml(m) {
   return renderMarkdown(m.content) + (m.imageLost ? '<p class="note">Rasm brauzer xotirasi to\'lgani sababli saqlanmadi.</p>' : "");
 }
 
+// ---------- Xabarlarni chizish ----------
 function addMessageEl(role, content, sources, msg) {
   welcomeEl.hidden = true;
   const wrap = document.createElement("div");
@@ -145,8 +214,8 @@ function addMessageEl(role, content, sources, msg) {
 }
 function renderAll() {
   chatEl.querySelectorAll(".msg").forEach((n) => n.remove());
-  welcomeEl.hidden = state.messages.length > 0;
-  for (const m of state.messages) addMessageEl(m.role, m.content, m.sources, m);
+  welcomeEl.hidden = chat.messages.length > 0;
+  for (const m of chat.messages) addMessageEl(m.role, m.content, m.sources, m);
   scrollDown(true);
 }
 function scrollDown(force) {
@@ -154,34 +223,99 @@ function scrollDown(force) {
   if (force || nearBottom) chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-// ---------- Fanlar ----------
-function renderSubjects(filter = "") {
-  const q = filter.trim().toLowerCase();
-  subjectsEl.innerHTML = "";
-  const list = [{ id: null, name: "Umumiy (barcha fanlar)", icon: "γ" }, ...subjects];
-  for (const s of list) {
-    if (q && !s.name.toLowerCase().includes(q)) continue;
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "subject" + (state.subject === s.id ? " active" : "");
-    b.innerHTML = `<span class="ic"></span><span></span>`;
-    b.children[0].textContent = s.icon;
-    b.children[1].textContent = s.name;
-    b.addEventListener("click", () => selectSubject(s.id));
-    subjectsEl.appendChild(b);
+// ---------- Yon panel: suhbatlar ro'yxati ----------
+function renderChats() {
+  const q = $("chatSearch").value.trim().toLowerCase();
+  const list = [...store.chats].sort((a, b) => b.updatedAt - a.updatedAt);
+  $("chatCount").textContent = String(list.length);
+  chatListEl.innerHTML = "";
+  const shown = q
+    ? list.filter((c) => c.title.toLowerCase().includes(q) || c.messages.some((m) => m.content.toLowerCase().includes(q)))
+    : list;
+  if (!shown.length) {
+    const p = document.createElement("p");
+    p.className = "chat-empty";
+    p.textContent = q ? "Hech narsa topilmadi." : "Hali suhbatlar yo'q. Savol yozing — suhbat shu yerda mavzusi bilan saqlanadi.";
+    chatListEl.appendChild(p);
+    return;
+  }
+  for (const c of shown) {
+    const row = document.createElement("div");
+    row.className = "chat-item" + (c === chat ? " active" : "");
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "chat-open";
+    open.textContent = c.title;
+    open.title = c.title;
+    open.addEventListener("click", () => openChat(c));
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "chat-del";
+    del.setAttribute("aria-label", `«${c.title}» suhbatini o'chirish`);
+    del.textContent = "✕";
+    del.addEventListener("click", () => {
+      // Tasodifan o'chirilmasin: birinchi bosishda so'raymiz, ikkinchisida o'chiramiz
+      if (del.dataset.armed) return deleteChat(c);
+      del.dataset.armed = "1";
+      del.textContent = "O'chirish?";
+      row.classList.add("armed");
+      setTimeout(() => {
+        delete del.dataset.armed;
+        del.textContent = "✕";
+        row.classList.remove("armed");
+      }, 3000);
+    });
+    row.append(open, del);
+    chatListEl.appendChild(row);
   }
 }
-function selectSubject(id) {
-  state.subject = id;
+
+function switchTo(next) {
+  if (controller) controller.abort();
+  chat = next;
   save();
+  renderChats();
   updateCurrent();
-  renderSubjects($("subjectSearch").value);
+  renderAll();
   closeSidebar();
   inputEl.focus();
 }
+const openChat = (c) => { if (c !== chat) switchTo(c); else closeSidebar(); };
+
+function deleteChat(c) {
+  store.chats = store.chats.filter((x) => x !== c);
+  if (c === chat) switchTo(newDraft());
+  else { save(); renderChats(); }
+}
+
 function updateCurrent() {
-  const s = subjects.find((x) => x.id === state.subject);
-  $("currentSubject").textContent = s ? `${s.icon}  ${s.name}` : "Umumiy";
+  $("currentTitle").textContent = chat.title || "Yangi suhbat";
+}
+
+// Yangi savol joriy suhbatga qo'shiladi; suhbat birinchi savolda ro'yxatga yoziladi
+function pushUserMessage(c, text) {
+  c.messages.push({ role: "user", content: text });
+  c.updatedAt = Date.now();
+  let isNew = false;
+  if (!isSaved(c)) {
+    c.id = newId();
+    c.title = provisionalTitle(text);
+    c.titlePending = true;
+    store.chats.push(c);
+    isNew = true;
+  }
+  save();
+  renderChats();
+  updateCurrent();
+  if (isNew) requestTitle(c);
+}
+
+// Javob kelmagan (yoki boshqa suhbatga o'tilgani uchun bekor qilingan) savolni olib tashlaymiz
+function dropUnanswered(c) {
+  if (c.messages.at(-1)?.role === "user") c.messages.pop();
+  if (!c.messages.length) store.chats = store.chats.filter((x) => x !== c);
+  save();
+  renderChats();
 }
 
 const SUGGESTIONS = [
@@ -201,7 +335,8 @@ function renderSuggestions() {
     b.children[0].textContent = s.label;
     b.children[1].textContent = s.text;
     b.addEventListener("click", () => {
-      selectSubject(s.subject);
+      if (busy) return;
+      if (!chat.messages.length) chat.subject = s.subject;
       send(s.text);
     });
     box.appendChild(b);
@@ -257,9 +392,8 @@ async function sendImage(text) {
   inputEl.value = "";
   autosize();
 
-  state.messages.push({ role: "user", content: text });
-  const convo = state.messages;
-  save();
+  const c = chat;
+  pushUserMessage(c, text);
   addMessageEl("user", text);
   const bubble = addMessageEl("assistant", "");
   bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div><p class="note">Rasm yaratilmoqda… (odatda 10–60 soniya)</p>';
@@ -286,22 +420,22 @@ async function sendImage(text) {
 
   busy = false;
   controller = null;
-  if (state.messages !== convo) {
-    sendBtn.disabled = !inputEl.value.trim();
-    return;
-  }
+  sendBtn.disabled = !inputEl.value.trim();
+  if (chat !== c) return dropUnanswered(c); // foydalanuvchi boshqa suhbatga o'tdi
+
   if (image) {
     const msg = { role: "assistant", content: `Foydalanuvchi so'roviga ko'ra rasm yaratildi: «${text}».`, image };
     if (imageSource) msg.imageSource = imageSource;
     bubble.innerHTML = imageMessageHtml(msg);
-    state.messages.push(msg);
+    c.messages.push(msg);
+    c.updatedAt = Date.now();
+    save();
   } else {
     bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Rasm yaratilmadi.")}</p>`;
-    state.messages.pop();
+    dropUnanswered(c);
+    if (!isSaved(c)) chat = newDraft(c.subject);
   }
-  save();
   scrollDown(true);
-  sendBtn.disabled = !inputEl.value.trim();
 }
 
 // ---------- Yuborish ----------
@@ -314,10 +448,9 @@ async function send(text) {
   inputEl.value = "";
   autosize();
 
-  state.messages.push({ role: "user", content: text });
-  // Shu suhbatni eslab qolamiz: javob kelguncha "Yangi suhbat" bosilsa, javob yangi suhbatga tushmasin
-  const convo = state.messages;
-  save();
+  // Shu suhbatni eslab qolamiz: javob kelguncha boshqa suhbatga o'tilsa, javob u yerga tushmasin
+  const c = chat;
+  pushUserMessage(c, text);
   addMessageEl("user", text);
   const bubble = addMessageEl("assistant", "");
   bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
@@ -333,7 +466,7 @@ async function send(text) {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: state.messages.map(({ role, content }) => ({ role, content })), subject: state.subject }),
+      body: JSON.stringify({ messages: c.messages.map(({ role, content }) => ({ role, content })), subject: c.subject }),
       signal: controller.signal,
     });
     if (!res.ok || !res.body) {
@@ -383,26 +516,24 @@ async function send(text) {
 
   busy = false;
   controller = null;
-  if (state.messages !== convo) {
-    // Foydalanuvchi yangi suhbat boshladi — eski javobni tashlab yuboramiz
-    sendBtn.disabled = !inputEl.value.trim();
-    return;
-  }
+  sendBtn.disabled = !inputEl.value.trim();
+  if (chat !== c) return dropUnanswered(c); // foydalanuvchi boshqa suhbatga o'tdi
 
   if (answer) {
     let html = renderMarkdown(answer) + sourcesHtml(sources);
     if (truncated) html += '<p class="note">Javob uzunlik chegarasiga yetdi. Davom ettirish uchun «Davom eting» deb yozing.</p>';
     if (errorText) html += `<p class="error">${escapeHtml(errorText)}</p>`;
     bubble.innerHTML = html;
-    state.messages.push(sources.length ? { role: "assistant", content: answer, sources } : { role: "assistant", content: answer });
+    c.messages.push(sources.length ? { role: "assistant", content: answer, sources } : { role: "assistant", content: answer });
+    c.updatedAt = Date.now();
+    save();
   } else {
     bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Javob olinmadi.")}</p>`;
     // Javobsiz savolni tarixdan olib tashlaymiz, shunda qayta yuborish mumkin
-    state.messages.pop();
+    dropUnanswered(c);
+    if (!isSaved(c)) chat = newDraft(c.subject);
   }
-  save();
   scrollDown();
-  sendBtn.disabled = !inputEl.value.trim();
 }
 
 // ---------- UI hodisalari ----------
@@ -424,15 +555,8 @@ $("composer").addEventListener("submit", (e) => {
   e.preventDefault();
   send(inputEl.value);
 });
-$("newChat").addEventListener("click", () => {
-  if (controller) controller.abort();
-  state.messages = [];
-  save();
-  renderAll();
-  closeSidebar();
-  inputEl.focus();
-});
-$("subjectSearch").addEventListener("input", (e) => renderSubjects(e.target.value));
+$("newChat").addEventListener("click", () => switchTo(newDraft()));
+$("chatSearch").addEventListener("input", renderChats);
 
 function closeSidebar() {
   $("sidebar").classList.remove("open");
@@ -460,23 +584,19 @@ $("themeBtn").addEventListener("click", () => {
 // ---------- Ishga tushirish ----------
 (async function init() {
   load();
-  try {
-    subjects = await (await fetch("/api/subjects")).json();
-  } catch {
-    subjects = [];
-  }
+  renderChats();
+  updateCurrent();
+  renderSuggestions();
+  renderAll();
+  sendBtn.disabled = true;
+  inputEl.focus();
+  // Avval sarlavhasi olinmay qolgan suhbatlar uchun qayta so'raymiz
+  store.chats.filter((c) => c.titlePending).slice(0, 3).forEach(requestTitle);
   try {
     imagesAvailable = !!(await (await fetch("/api/features")).json()).images;
   } catch {
     imagesAvailable = false;
   }
   imageBtn.hidden = !imagesAvailable;
-  $("subjectCount").textContent = String(subjects.length);
-  if (!subjects.some((s) => s.id === state.subject)) state.subject = null;
-  renderSubjects();
-  updateCurrent();
-  renderSuggestions();
-  renderAll();
-  sendBtn.disabled = true;
-  inputEl.focus();
+  if (!imagesAvailable) setImageMode(false);
 })();

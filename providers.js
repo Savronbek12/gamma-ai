@@ -169,3 +169,54 @@ async function streamClaude({ systemParts, messages, signal, onText }) {
   if (final.stop_reason === "max_tokens") return "max_tokens";
   return "end";
 }
+
+// ---------------------------------------------------------------------------
+// Suhbat sarlavhasi: birinchi savol asosida 2–6 so'zli qisqa nom
+// ---------------------------------------------------------------------------
+const TITLE_SYSTEM =
+  "Foydalanuvchining birinchi xabari asosida suhbat uchun 2–6 so'zdan iborat qisqa sarlavha yozing. " +
+  "Sarlavha suhbat mavzusini aniq ifodalasin va xabar tilida (odatda o'zbek tili, lotin yozuvi) bo'lsin. " +
+  "Faqat sarlavhaning o'zini qaytaring: qo'shtirnoqsiz, nuqtasiz, izohsiz.";
+
+function cleanTitle(raw) {
+  const line = String(raw || "").split("\n").map((s) => s.trim()).find(Boolean) || "";
+  const t = line.replace(/^(sarlavha|title)\s*:\s*/i, "").replace(/^["'«»“”*#\s]+|["'«»“”*.!?:\s]+$/g, "").trim();
+  return t ? t.slice(0, 70) : null;
+}
+
+export async function generateTitle(text, signal) {
+  const input = String(text).slice(0, 1500);
+  if (PROVIDER === "groq") {
+    groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
+    const r = await groq.chat.completions.create(
+      {
+        model: process.env.TITLE_MODEL || "llama-3.1-8b-instant",
+        temperature: 0.2,
+        max_completion_tokens: 40,
+        messages: [{ role: "system", content: TITLE_SYSTEM }, { role: "user", content: input }],
+      },
+      { signal },
+    );
+    return cleanTitle(r.choices?.[0]?.message?.content);
+  }
+  if (PROVIDER === "gemini") {
+    gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const r = await gemini.models.generateContent({
+      model: process.env.TITLE_MODEL || MODEL,
+      contents: [{ role: "user", parts: [{ text: input }] }],
+      config: { systemInstruction: TITLE_SYSTEM, abortSignal: signal },
+    });
+    return cleanTitle(r.text);
+  }
+  claude ??= new Anthropic();
+  const r = await claude.messages.create(
+    {
+      model: process.env.TITLE_MODEL || "claude-haiku-5-5",
+      max_tokens: 60,
+      system: TITLE_SYSTEM,
+      messages: [{ role: "user", content: input }],
+    },
+    { signal },
+  );
+  return cleanTitle(r.content.find((b) => b.type === "text")?.text);
+}

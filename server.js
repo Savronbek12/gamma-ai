@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { SUBJECTS } from "./subjects.js";
 import { wikipediaContext, wikipediaInstruction } from "./wikipedia.js";
 import { generateImage, imageErrorMessage, imagesEnabled } from "./images.js";
-import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs } from "./providers.js";
+import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs, generateTitle } from "./providers.js";
 
 const MAX_RATE_WAIT_MS = 45_000; // daqiqalik limitda foydalanuvchini ko'pi bilan shuncha kuttiramiz
 const sleep = (ms, signal) =>
@@ -81,6 +81,7 @@ const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_PER_MINUTE) || 15;
 const IMAGE_RATE_LIMIT_MAX = Number(process.env.IMAGE_RATE_LIMIT_PER_MINUTE) || 4;
 const hits = new Map();
 const imageHits = new Map();
+const titleHits = new Map();
 
 function rateLimited(ip, store = hits, max = RATE_LIMIT_MAX) {
   const now = Date.now();
@@ -91,7 +92,7 @@ function rateLimited(ip, store = hits, max = RATE_LIMIT_MAX) {
 }
 setInterval(() => {
   const now = Date.now();
-  for (const store of [hits, imageHits]) {
+  for (const store of [hits, imageHits, titleHits]) {
     for (const [ip, times] of store) {
       if (times.every((t) => now - t >= RATE_LIMIT_WINDOW_MS)) store.delete(ip);
     }
@@ -233,8 +234,24 @@ app.post("/api/chat", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Rasm yaratish (Gemini / Pollinations)
+// Rasm yaratish (Gemini / ChatGPT)
 // ---------------------------------------------------------------------------
+// Suhbat sarlavhasi (yon paneldagi suhbatlar ro'yxati uchun)
+app.post("/api/title", async (req, res) => {
+  if (rateLimited(req.ip, titleHits, 10)) return res.status(429).json({ title: null });
+  const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+  if (!text) return res.status(400).json({ title: null });
+  const abort = new AbortController();
+  res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+  try {
+    res.json({ title: await generateTitle(text, abort.signal) });
+  } catch (err) {
+    if (abort.signal.aborted) return;
+    console.warn("Sarlavha xatosi:", err?.status, err?.message);
+    res.status(502).json({ title: null });
+  }
+});
+
 app.get("/api/features", (_req, res) => res.json({ images: imagesEnabled() }));
 
 app.post("/api/image", async (req, res) => {

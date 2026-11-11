@@ -115,20 +115,29 @@ button, input, textarea { font: inherit; color: inherit; }
 .subject-search::placeholder { color: var(--muted); }
 .subject-search:focus { outline: 0; border-color: var(--accent); }
 
-.subjects { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; margin: 0 -4px; padding: 0 4px; }
-.subject {
-  display: flex; align-items: center; gap: 10px;
-  border: 0; background: transparent; text-align: left; cursor: pointer;
-  padding: 8px 10px; border-radius: 6px; font-size: 14.5px; font-weight: 700;
-  position: relative;
-}
-.subject:hover { background: var(--surface); }
-.subject.active { background: var(--surface-2); }
-.subject.active::before {
+.chat-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; margin: 0 -4px; padding: 0 4px; }
+.chat-empty { color: var(--muted); font-size: 13px; padding: 8px 10px; margin: 0; }
+.chat-item { display: flex; align-items: center; position: relative; border-radius: 6px; }
+.chat-item:hover { background: var(--surface); }
+.chat-item.active { background: var(--surface-2); }
+.chat-item.active::before {
   content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
   border-radius: 3px; background: var(--accent);
 }
-.subject .ic { width: 22px; text-align: center; flex-shrink: 0; }
+.chat-open {
+  flex: 1; min-width: 0; border: 0; background: transparent; cursor: pointer; text-align: left;
+  padding: 8px 6px 8px 12px; font-size: 14.5px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chat-del {
+  flex-shrink: 0; border: 0; background: transparent; cursor: pointer;
+  color: var(--muted); font-size: 12px; font-weight: 800; border-radius: 4px;
+  padding: 4px 8px; margin-right: 4px; opacity: 0;
+}
+.chat-item:hover .chat-del, .chat-item.active .chat-del, .chat-del:focus-visible, .chat-item.armed .chat-del { opacity: 1; }
+.chat-del:hover { color: var(--danger); }
+.chat-item.armed .chat-del { color: #fff; background: var(--danger); }
+@media (hover: none) { .chat-del { opacity: 1; } }
 
 /* ---------- Main ---------- */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }

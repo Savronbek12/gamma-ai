@@ -27,11 +27,11 @@
       <button class="new-chat" id="newChat" type="button">+ Yangi suhbat</button>
 
       <div class="subjects-head">
-        <span>Fanlar</span>
-        <span class="count" id="subjectCount">30</span>
+        <span>Suhbatlar</span>
+        <span class="count" id="chatCount">0</span>
       </div>
-      <input class="subject-search" id="subjectSearch" type="search" placeholder="Fanni qidirish…" aria-label="Fanni qidirish">
-      <nav class="subjects" id="subjects" aria-label="Fanlar ro'yxati"></nav>
+      <input class="subject-search" id="chatSearch" type="search" placeholder="Suhbatni qidirish…" aria-label="Suhbatni qidirish">
+      <nav class="chat-list" id="chatList" aria-label="Suhbatlar ro'yxati"></nav>
 
       <div class="credit">Yaratuvchi: <strong>Savronbek</strong></div>
     </aside>
@@ -40,10 +40,10 @@
 
     <main class="main">
       <header class="topbar">
-        <button class="menu-btn" id="menuBtn" type="button" aria-label="Fanlar menyusi">☰</button>
+        <button class="menu-btn" id="menuBtn" type="button" aria-label="Suhbatlar menyusi">☰</button>
         <div class="current">
-          <span class="current-label">Joriy fan</span>
-          <span class="current-name" id="currentSubject">Umumiy</span>
+          <span class="current-label">Suhbat</span>
+          <span class="current-name" id="currentTitle">Yangi suhbat</span>
         </div>
         <button class="theme-btn" id="themeBtn" type="button" aria-label="Mavzuni almashtirish">◐</button>
       </header>
@@ -58,7 +58,7 @@
       </section>
 
       <form class="composer" id="composer">
-        <button type="button" id="imageBtn" class="image-btn" aria-pressed="false" aria-label="Rasm yaratish rejimi" title="Rasm yaratish (Gemini)" hidden>🖼</button>
+        <button type="button" id="imageBtn" class="image-btn" aria-pressed="false" aria-label="Rasm yaratish rejimi" title="Rasm yaratish (Gemini / ChatGPT)" hidden>🖼</button>
         <textarea id="input" rows="1" placeholder="Savolingizni yozing…" aria-label="Savol" maxlength="8000"></textarea>
         <button type="submit" id="sendBtn" aria-label="Yuborish">➤</button>
       </form>

@@ -8,10 +8,11 @@
 Sun'iy intellekt: **Groq** (bepul, standart, model `openai/gpt-oss-120b`), **Google Gemini** (bepul) yoki **Claude** (pullik) — `AI_PROVIDER` sozlamasi bilan tanlanadi.
 
 ## Imkoniyatlar
-- 30 ta fan (matematika, fizika, kimyo, tarix, huquq, tibbiyot, iqtisodiyot va boshqalar) — chap paneldan tanlanadi
+- 30 ta fan (matematika, fizika, kimyo, tarix, huquq, tibbiyot, iqtisodiyot va boshqalar) bo'yicha savollarga javob
+- Chap panelda suhbatlar ro'yxati: har bir suhbat mavzusiga qarab avtomatik nomlanadi va saqlanadi (qidirish, o'chirish mumkin)
 - Rasmiy, akademik uslub, "Siz" deb murojaat; foydalanuvchi tilida javob (standart — o'zbek tili)
 - Ochiq Wikipedia'dan (uz / ru / en) savolga oid ma'lumot avtomatik qidiriladi va modelga beriladi; manbalar javob ostida havola sifatida ko'rsatiladi (API kaliti kerak emas, `WIKIPEDIA=off` bilan o'chiriladi)
-- Rasm yaratish: 🖼 tugmasi yoki «… rasmini chizib bering» kabi so‘rov. `GEMINI_API_KEY` bo‘lsa — Google Gemini, bo‘lmasa — bepul, kalitsiz Pollinations.ai (bepul tarifda ~45 soniyada 1 rasm; `IMAGE_FALLBACK=off` bilan o‘chiriladi)
+- Rasm yaratish: 🖼 tugmasi yoki «… rasmini chizib bering» kabi so‘rov. Google Gemini (`GEMINI_API_KEY`, billing yoqilgan bo‘lishi kerak) yoki ChatGPT rasm modeli (`OPENAI_API_KEY`). Ikkalasi bo‘lsa, `IMAGE_PROVIDER` birinchisini tanlaydi, ikkinchisi zaxira. Kalit bo‘lmasa, 🖼 tugmasi ko‘rinmaydi
 - Javob real vaqtda yoziladi (streaming); Markdown, jadvallar va LaTeX formulalar qo'llab-quvvatlanadi
 - Yorug' / qorong'i mavzu, telefon uchun moslashgan dizayn
 - Suhbat tarixi foydalanuvchi brauzerida saqlanadi
