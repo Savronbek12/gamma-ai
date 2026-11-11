@@ -133,7 +133,7 @@ function trimHistory(messages, budget) {
 const app = express();
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static(path.join(here, "public")));
+app.use(express.static(path.join(here, "..", "public")));
 
 app.get("/api/subjects", (_req, res) => res.json(SUBJECTS));
 // Render RENDER_GIT_COMMIT ni o'zi beradi — qaysi versiya ishlayotganini ko'rish uchun

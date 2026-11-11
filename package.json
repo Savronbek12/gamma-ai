@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "description": "Gamma AI — 30 fan bo'yicha professor darajasidagi sun'iy intellekt (Gamma-AI.uz)",
   "type": "module",
-  "main": "server.js",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node --env-file-if-exists=.env server.js",
-    "dev": "node --watch --env-file-if-exists=.env server.js"
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "dev": "node --watch --env-file-if-exists=.env src/server.js"
   },
   "engines": {
     "node": ">=22"

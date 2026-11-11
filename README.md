@@ -32,7 +32,7 @@ Sun'iy intellekt: **Groq** (bepul, standart, model `openai/gpt-oss-120b`), **Goo
 
 ## 2. Internetga chiqarish (hosting)
 Node.js qo'llab-quvvatlaydigan istalgan server mos keladi:
-- **VPS** (masalan, O'zbekistondagi ahost.uz, uzhost.uz yoki xorijiy DigitalOcean/Hetzner): Ubuntu o'rnatib, Node.js 22+, `npm install`, so'ng `pm2 start server.js --node-args="--env-file=.env"` bilan doimiy ishlatiladi. Oldiga Nginx (reverse proxy) va Let's Encrypt (HTTPS) qo'yiladi.
+- **VPS** (masalan, O'zbekistondagi ahost.uz, uzhost.uz yoki xorijiy DigitalOcean/Hetzner): Ubuntu o'rnatib, Node.js 22+, `npm install`, so'ng `pm2 start src/server.js --node-args="--env-file=.env"` bilan doimiy ishlatiladi. Oldiga Nginx (reverse proxy) va Let's Encrypt (HTTPS) qo'yiladi.
 - **Render.com / Railway.app**: loyihani GitHub'ga yuklab, "Web Service" yarating, `npm start` buyrug'ini va `GROQ_API_KEY` muhit o'zgaruvchisini kiriting.
 
 Nginx uchun streaming ishlashi uchun muhim sozlama:
@@ -56,6 +56,19 @@ location / {
 4. HTTPS sertifikat: VPS'da `sudo certbot --nginx -d gamma-ai.uz -d www.gamma-ai.uz`.
 
 ## Sozlash
-- Fanlar ro'yxati: `subjects.js`
-- Gamma AI xulq-atvori va uslubi (tizim ko'rsatmasi): `server.js` ichidagi `BASE_SYSTEM`
+- Fanlar ro'yxati: `src/subjects.js`
+- Gamma AI xulq-atvori va uslubi (tizim ko'rsatmasi): `src/server.js` ichidagi `BASE_SYSTEM`
 - Provayder va model: `.env` faylida `AI_PROVIDER` (groq / gemini / claude) va `GAMMA_MODEL`. Mos ravishda `GROQ_API_KEY`, `GEMINI_API_KEY` yoki `ANTHROPIC_API_KEY` kerak.
+
+## Fayllar tuzilishi
+```
+src/            server kodi
+  server.js       Express server, API yo'llari, tizim ko'rsatmasi
+  providers.js    AI provayderlari (Groq / Gemini / Claude), suhbat sarlavhasi
+  images.js       rasm yaratish (Gemini / ChatGPT)
+  wikipedia.js    Wikipedia'dan ma'lumot qidirish
+  subjects.js     30 ta fan ro'yxati
+public/         sayt (brauzer qismi): index.html, style.css, app.js
+.env.example    sozlamalar namunasi
+render.yaml     Render.com sozlamasi
+```
