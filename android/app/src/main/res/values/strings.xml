@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Gamma AI</string>
+    <string name="offline_title">Internet aloqasi yo\'q</string>
+    <string name="offline_text">Gamma AI ishlashi uchun internet kerak. Aloqani tekshirib, qayta urinib ko\'ring.</string>
+    <string name="retry">Qayta urinish</string>
+    <string name="loading">Yuklanmoqda…</string>
+</resources>

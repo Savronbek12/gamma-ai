@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gamma (Γ) belgisi -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,32 L72,32 L72,41 L48,41 L48,76 L38,76 Z" />
+    <path
+        android:fillColor="#93C5FD"
+        android:pathData="M66,62 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 Z" />
+</vector>
