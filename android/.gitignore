@@ -8,3 +8,4 @@ local.properties
 *.keystore
 *.jks
 captures/
+keystore.properties
