@@ -4,7 +4,7 @@
 //   claude (pullik)                 — ANTHROPIC_API_KEY kerak
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI, ApiError } from "@google/genai";
-import Groq from "groq-sdk";
+import Groq, { toFile } from "groq-sdk";
 
 export const PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
 
@@ -271,15 +271,39 @@ const VISION_SYSTEM =
   "everything else that matters for understanding: diagrams, charts (axes, values, trends), tables (as Markdown), " +
   "drawings, photos, handwriting. If it is a task or exam question, reproduce it completely. Do not solve anything, " +
   "do not add opinions. Write the description part in Uzbek (Latin script).";
+const VIDEO_FRAMES_NOTE =
+  " This image is a grid of frames taken from ONE video in time order (left to right, top to bottom; each frame is " +
+  "labeled with its timestamp). Describe what is shown and what happens in the video over time, frame by frame where useful.";
 
-export async function describeImage(buf, mime, signal) {
+// ---------------------------------------------------------------------------
+// Audio/video nutqini matnga aylantirish (Groq Whisper). Boshqa provayderlarda — null.
+// ---------------------------------------------------------------------------
+export const canTranscribe = () => PROVIDER === "groq" || !!process.env.GROQ_API_KEY;
+
+export async function transcribeAudio(buf, name, signal) {
+  if (!canTranscribe()) return null;
+  groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
+  const r = await groq.audio.transcriptions.create(
+    {
+      file: await toFile(buf, name),
+      model: process.env.TRANSCRIBE_MODEL || "whisper-large-v3-turbo",
+      response_format: "json",
+      temperature: 0,
+    },
+    { signal },
+  );
+  return String(r?.text || "").trim();
+}
+
+export async function describeImage(buf, mime, signal, { videoFrames = false } = {}) {
+  const system = VISION_SYSTEM + (videoFrames ? VIDEO_FRAMES_NOTE : "");
   const dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
   if (PROVIDER === "gemini") {
     gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const r = await gemini.models.generateContent({
       model: process.env.VISION_MODEL || MODEL,
       contents: [{ role: "user", parts: [{ inlineData: { mimeType: mime, data: buf.toString("base64") } }, { text: "Rasmni o'qing." }] }],
-      config: { systemInstruction: VISION_SYSTEM, abortSignal: signal },
+      config: { systemInstruction: system, abortSignal: signal },
     });
     return r.text;
   }
@@ -289,7 +313,7 @@ export async function describeImage(buf, mime, signal) {
       {
         model: process.env.VISION_MODEL || MODEL,
         max_tokens: 4000,
-        system: VISION_SYSTEM,
+        system,
         messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: mime, data: buf.toString("base64") } }, { type: "text", text: "Rasmni o'qing." }] }],
       },
       { signal },
@@ -309,7 +333,7 @@ export async function describeImage(buf, mime, signal) {
           temperature: 0.1,
           max_completion_tokens: 2500,
           messages: [
-            { role: "system", content: VISION_SYSTEM },
+            { role: "system", content: system },
             { role: "user", content: [{ type: "text", text: "Rasmni o'qing." }, { type: "image_url", image_url: { url: dataUrl } }] },
           ],
         },

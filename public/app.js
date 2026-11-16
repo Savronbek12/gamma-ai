@@ -57,7 +57,7 @@ function cleanMessages(list) {
     const item = { role: m.role, content: m.content };
     if (m.role === "user" && m.file && typeof m.file.name === "string" && typeof m.file.text === "string") {
       item.file = {
-        name: m.file.name.slice(0, 200), kind: m.file.kind === "image" ? "image" : "document",
+        name: m.file.name.slice(0, 200), kind: ["image", "video", "audio"].includes(m.file.kind) ? m.file.kind : "document",
         text: m.file.text.slice(0, 60000), chars: Number(m.file.chars) || m.file.text.length,
         truncated: !!m.file.truncated, ...(m.file.lost ? { lost: true } : {}),
       };
@@ -270,13 +270,25 @@ function addMessageEl(role, content, sources, msg) {
 }
 
 // ---------- Biriktirilgan fayl belgisi ----------
+const KIND_ICON = { image: "🖼", video: "🎬", audio: "🎵", document: "📄" };
+const KIND_LOADING = {
+  image: "rasm o'qilmoqda…", video: "video ko'rilmoqda (kadrlar va nutq)…", audio: "nutq matnga aylantirilmoqda…",
+};
+const KIND_DONE = { image: "rasm o'qildi", video: "video o'qildi", audio: "audio o'qildi" };
+// Savol yozilmasdan faqat fayl yuborilsa
+const DEFAULT_ASK = {
+  image: "Ushbu rasmni tushuntirib bering.",
+  video: "Ushbu videoda nima ko'rsatilgan va nima haqida gapirilgan? Tushuntirib bering.",
+  audio: "Ushbu audio yozuvda nima haqida gapirilgan? Mazmunini tushuntirib bering.",
+  document: "Ushbu faylni o'qib, mazmunini tushuntirib bering.",
+};
 const formatChars = (n) => (n >= 1000 ? `${Math.round(n / 1000)} ming belgi` : `${n} belgi`);
 function fileChipEl(file, { status, onRemove } = {}) {
   const chip = document.createElement("div");
   chip.className = "file-chip" + (status === "error" ? " error" : "");
   const icon = document.createElement(status === "uploading" ? "span" : "span");
   if (status === "uploading") icon.className = "spin";
-  else icon.textContent = file.kind === "image" ? "🖼" : "📄";
+  else icon.textContent = KIND_ICON[file.kind] || "📄";
   const name = document.createElement("span");
   name.className = "fname";
   name.textContent = file.name;
@@ -284,10 +296,10 @@ function fileChipEl(file, { status, onRemove } = {}) {
   const meta = document.createElement("span");
   meta.className = "fmeta";
   meta.textContent =
-    status === "uploading" ? (file.kind === "image" ? "rasm o'qilmoqda…" : "o'qilmoqda…")
+    status === "uploading" ? KIND_LOADING[file.kind] || "o'qilmoqda…"
     : status === "error" ? file.error
     : file.lost ? "matni saqlanmagan"
-    : file.kind === "image" ? "rasm o'qildi"
+    : KIND_DONE[file.kind] ? KIND_DONE[file.kind]
     : formatChars(file.chars || file.text.length) + (file.truncated ? " (qisqartirildi)" : "");
   chip.append(icon, name, meta);
   if (onRemove) {
@@ -496,7 +508,7 @@ function renderSuggestions() {
 }
 
 // ---------- Rasm qidirish rejimi (ochiq internetdan) ----------
-const imageBtn = $("imageBtn");
+const searchItem = $("searchItem");
 let imagesAvailable = false;
 let imageMode = false;
 
@@ -510,12 +522,54 @@ const wantsImage = (text) => IMAGE_INTENT.some((re) => re.test(text));
 
 function setImageMode(on) {
   imageMode = on && imagesAvailable;
-  imageBtn.setAttribute("aria-pressed", String(imageMode));
+  searchItem.classList.toggle("on", imageMode);
+  searchItem.setAttribute("aria-checked", String(imageMode));
+  $("plusBtn").classList.toggle("active", imageMode);
   inputEl.placeholder = imageMode ? "Qanday rasm kerak? (masalan: Registon maydoni, Samarqand)" : "Savolingizni yozing…";
 }
-imageBtn.addEventListener("click", () => {
-  setImageMode(!imageMode);
-  inputEl.focus();
+
+// ---------- "+" menyusi: rasm, video, audio, fayl, internetdan rasm qidirish ----------
+const plusBtn = $("plusBtn");
+const plusMenu = $("plusMenu");
+const PICK_ACCEPT = {
+  image: "image/*,.png,.jpg,.jpeg,.webp,.gif",
+  video: "video/*,.mp4,.webm,.mov,.mkv,.m4v,.3gp",
+  audio: "audio/*,.mp3,.wav,.m4a,.ogg,.oga,.opus,.flac",
+  file:
+    ".pdf,.docx,.pptx,.xlsx,.odt,.odp,.ods,.txt,.md,.csv,.tsv,.json,.xml,.html,.htm,.rtf,.tex,.srt,.vtt," +
+    ".js,.ts,.py,.java,.c,.cpp,.cs,.go,.php,.sql,.yaml,.yml,.png,.jpg,.jpeg,.webp,.mp3,.mp4",
+};
+function toggleMenu(open = plusMenu.hidden) {
+  plusMenu.hidden = !open;
+  plusBtn.setAttribute("aria-expanded", String(open));
+  if (open) plusMenu.querySelector("button:not([hidden])")?.focus();
+}
+plusBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!busy) toggleMenu();
+});
+plusMenu.addEventListener("click", (e) => {
+  const item = e.target.closest("button[data-pick]");
+  if (!item) return;
+  toggleMenu(false);
+  const pick = item.dataset.pick;
+  if (pick === "search") {
+    setImageMode(!imageMode);
+    inputEl.focus();
+    return;
+  }
+  if (imageMode) setImageMode(false);
+  fileInput.accept = PICK_ACCEPT[pick] || "";
+  fileInput.click();
+});
+document.addEventListener("click", (e) => {
+  if (!plusMenu.hidden && !e.target.closest(".plus-wrap")) toggleMenu(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !plusMenu.hidden) {
+    toggleMenu(false);
+    plusBtn.focus();
+  }
 });
 
 async function sendImage(text) {
@@ -577,7 +631,7 @@ async function sendImage(text) {
 // ---------- Fayl biriktirish ----------
 const attachBar = $("attachBar");
 const fileInput = $("fileInput");
-const MAX_FILE_MB = 20;
+const MAX_FILE_MB = 25;
 let attachment = null; // { status: "uploading" | "ready" | "error", name, kind, text, chars, truncated, error }
 let attachController = null;
 
@@ -617,43 +671,146 @@ async function shrinkImage(file) {
   return blob ? { blob, name: file.name.replace(/\.[^.]+$/, "") + ".jpg" } : { blob: file, name: file.name };
 }
 
+async function uploadBlob(blob, name, signal, purpose = "") {
+  const res = await fetch("/api/upload", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "X-File-Name": encodeURIComponent(name),
+      ...(purpose ? { "X-Purpose": purpose } : {}),
+    },
+    body: blob,
+    signal,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || typeof data.text !== "string") throw new Error(data.error || "Faylni o'qib bo'lmadi.");
+  return data;
+}
+
+// Videodan teng oraliqlarda 6 ta kadr olib, vaqt belgisi bilan bitta rasmga (3×2 to'r) joylaymiz
+const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+async function videoContactSheet(file) {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = url;
+  const once = (ev) =>
+    new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error("timeout")), 15000);
+      video.addEventListener(ev, () => { clearTimeout(t); resolve(); }, { once: true });
+      video.addEventListener("error", () => { clearTimeout(t); reject(new Error("video")); }, { once: true });
+    });
+  try {
+    await once("loadeddata");
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    if (!video.videoWidth || !duration) throw new Error("video");
+    const cols = 3, rows = 2, n = cols * rows;
+    const cellW = 640;
+    const cellH = Math.round((cellW * video.videoHeight) / video.videoWidth) || 360;
+    const canvas = document.createElement("canvas");
+    canvas.width = cellW * cols;
+    canvas.height = Math.min(cellH, 1200) * rows;
+    const h = canvas.height / rows;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (let i = 0; i < n; i++) {
+      const t = Math.min(duration - 0.05, ((i + 0.5) / n) * duration);
+      video.currentTime = t;
+      await once("seeked");
+      const x = (i % cols) * cellW, y = Math.floor(i / cols) * h;
+      ctx.drawImage(video, x, y, cellW, h);
+      ctx.fillStyle = "rgba(0,0,0,.65)";
+      ctx.fillRect(x + 8, y + 8, 120, 34);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 22px sans-serif";
+      ctx.fillText(`${i + 1}) ${fmtTime(t)}`, x + 16, y + 33);
+    }
+    const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.82));
+    if (!blob) throw new Error("canvas");
+    return { blob, duration };
+  } finally {
+    URL.revokeObjectURL(url);
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
+const TRANSCRIBABLE = /\.(mp3|wav|m4a|ogg|oga|opus|flac|mpga|mpeg|mp4|webm)$/i;
+
+// Video: kadrlar tavsifi (vision) + ovozdagi nutq (Whisper) parallel o'qiladi va bitta matnga birlashtiriladi
+async function readVideo(file, name, signal) {
+  const canSpeech = TRANSCRIBABLE.test(name) && file.size <= MAX_FILE_MB * 1024 * 1024;
+  const [frames, speech] = await Promise.allSettled([
+    videoContactSheet(file).then(async ({ blob, duration }) => ({
+      duration,
+      text: (await uploadBlob(blob, name.replace(/\.[^.]+$/, "") + "-kadrlar.jpg", signal, "video-frames")).text,
+    })),
+    canSpeech ? uploadBlob(file, name, signal, "video-audio").then((d) => d.text) : Promise.reject(new Error("skip")),
+  ]);
+  if (signal.aborted) throw new DOMException("aborted", "AbortError");
+  if (frames.status !== "fulfilled" && speech.status !== "fulfilled") {
+    const reason = frames.reason?.message;
+    throw new Error(
+      reason && !["video", "timeout", "canvas"].includes(reason)
+        ? reason
+        : "Videoni o'qib bo'lmadi. MP4 yoki WEBM formatidagi video yuboring.",
+    );
+  }
+  const parts = [`[Video: ${name}${frames.value?.duration ? `, davomiyligi ${fmtTime(frames.value.duration)}` : ""}]`];
+  parts.push(
+    frames.status === "fulfilled"
+      ? `Videodan olingan 6 ta kadr tavsifi:\n${frames.value.text}`
+      : "Kadrlarni o'qib bo'lmadi.",
+  );
+  parts.push(
+    speech.status === "fulfilled"
+      ? `Videodagi nutq (matnga aylantirilgan):\n${speech.value || "(nutq topilmadi)"}`
+      : canSpeech ? "Videodagi nutqni o'qib bo'lmadi." : `Videodagi nutq o'qilmadi (fayl ${MAX_FILE_MB} MB dan katta yoki formati mos emas).`,
+  );
+  return parts.join("\n\n");
+}
+
 async function attachFile(file) {
   if (!file || busy) return;
   attachController?.abort();
   const isImage = /^image\//.test(file.type) || /\.(png|jpe?g|webp|gif)$/i.test(file.name);
-  const name = file.name || (isImage ? "rasm.png" : "fayl");
-  if (file.size > MAX_FILE_MB * 1024 * 1024) {
-    attachment = { status: "error", name, kind: isImage ? "image" : "document", error: `juda katta (${MAX_FILE_MB} MB dan oshmasin)` };
+  const isVideo = /^video\//.test(file.type) || /\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i.test(file.name);
+  const isAudio = !isVideo && (/^audio\//.test(file.type) || /\.(mp3|wav|m4a|ogg|oga|opus|flac)$/i.test(file.name));
+  const kind = isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : "document";
+  const name = file.name || (isImage ? "rasm.png" : isVideo ? "video.mp4" : "fayl");
+  // Videoning o'zi yuklanmaydi (kadrlar brauzerda olinadi), shuning uchun u kattaroq bo'lishi mumkin
+  if (!isVideo && file.size > MAX_FILE_MB * 1024 * 1024) {
+    attachment = { status: "error", name, kind, error: `juda katta (${MAX_FILE_MB} MB dan oshmasin)` };
     return renderAttach();
   }
   const ctrl = (attachController = new AbortController());
-  attachment = { status: "uploading", name, kind: isImage ? "image" : "document" };
+  attachment = { status: "uploading", name, kind };
   renderAttach();
   try {
-    const { blob, name: uploadName } = isImage ? await shrinkImage(file).catch(() => ({ blob: file, name })) : { blob: file, name };
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(uploadName || name) },
-      body: blob,
-      signal: ctrl.signal,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || typeof data.text !== "string") throw new Error(data.error || "Faylni o'qib bo'lmadi.");
+    let text, chars, truncated = false;
+    if (isVideo) {
+      text = await readVideo(file, name, ctrl.signal);
+      chars = text.length;
+    } else {
+      const { blob, name: uploadName } = isImage ? await shrinkImage(file).catch(() => ({ blob: file, name })) : { blob: file, name };
+      const data = await uploadBlob(blob, uploadName || name, ctrl.signal);
+      ({ text, truncated } = data);
+      chars = Number(data.chars) || text.length;
+    }
     if (ctrl !== attachController) return;
-    attachment = {
-      status: "ready", name, kind: data.kind === "image" ? "image" : "document",
-      text: data.text, chars: Number(data.chars) || data.text.length, truncated: !!data.truncated,
-    };
+    attachment = { status: "ready", name, kind, text, chars, truncated: !!truncated };
   } catch (err) {
     if (err.name === "AbortError" || ctrl !== attachController) return;
-    attachment = { status: "error", name, kind: attachment?.kind || "document", error: err.message || "Tarmoq xatosi." };
+    attachment = { status: "error", name, kind, error: err.message || "Tarmoq xatosi." };
   }
   attachController = null;
   renderAttach();
   inputEl.focus();
 }
 
-$("attachBtn").addEventListener("click", () => { if (!busy) fileInput.click(); });
 fileInput.addEventListener("change", () => attachFile(fileInput.files[0]));
 inputEl.addEventListener("paste", (e) => {
   const file = [...(e.clipboardData?.files || [])][0];
@@ -776,7 +933,7 @@ async function send(text) {
   if (busy || attachment?.status === "uploading") return;
   const file = attachment?.status === "ready" ? attachment : null;
   if (!text && !file) return;
-  if (!text) text = file.kind === "image" ? "Ushbu rasmni tushuntirib bering." : "Ushbu faylni o'qib, mazmunini tushuntirib bering.";
+  if (!text) text = DEFAULT_ASK[file.kind] || DEFAULT_ASK.document;
   if (wantsPresentation(text)) return sendPresentation(text, { file: takeAttachment() });
   if (!file && imagesAvailable && (imageMode || wantsImage(text))) return sendImage(text);
   takeAttachment();
@@ -940,6 +1097,6 @@ $("themeBtn").addEventListener("click", () => {
   } catch {
     imagesAvailable = false;
   }
-  imageBtn.hidden = !imagesAvailable;
+  searchItem.hidden = !imagesAvailable;
   if (!imagesAvailable) setImageMode(false);
 })();

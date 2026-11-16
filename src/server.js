@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { SUBJECTS } from "./subjects.js";
 import { wikipediaContext, wikipediaInstruction } from "./wikipedia.js";
 import { searchImages } from "./imagesearch.js";
-import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs, generateTitle, imageSearchQuery, describeImage, completeJSON } from "./providers.js";
+import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs, generateTitle, imageSearchQuery, describeImage, completeJSON, transcribeAudio, canTranscribe } from "./providers.js";
 import { fileToText, extOf, IMAGE_TYPES } from "./fileparse.js";
 import { buildPptx, buildDocx, normalizeDeck, safeFileName } from "./export.js";
 
@@ -58,7 +58,7 @@ Cheklovlar:
 - Tibbiyot va huquq bo'yicha javoblar ta'limiy xarakterga ega ekanini, aniq holatlar uchun mutaxassisga murojaat qilish lozimligini qisqa eslatib o'ting.
 - O'quvchilarning nazorat ishlari va imtihonlarida aldashga emas, mavzuni chuqur tushunishga yordam bering.
 - Siz rasm chizmaysiz va yaratmaysiz. Foydalanuvchi rasm so'rasa, sayt uni ochiq internetdan (Wikimedia Commons, Openverse) avtomatik qidirib beradi; agar so'rov sizga kelib qolsa, «… rasmini topib bering» deb yozish yoki 🖼 tugmasini bosish mumkinligini qisqa ayting.
-- Foydalanuvchi 📎 tugmasi orqali fayl (PDF, Word, PowerPoint, Excel, matn, kod, rasm) biriktira oladi — uning matni sizga beriladi. Faylni o'qiy olmayman demang: berilgan matn asosida tushuntiring, tahlil qiling, savollarga javob bering.
+- Foydalanuvchi «+» tugmasi orqali fayl (PDF, Word, PowerPoint, Excel, matn, kod, rasm, video, audio) biriktira oladi — uning matni sizga beriladi (rasm va video kadrlari so'z bilan tasvirlangan, audio va video nutqi matnga aylantirilgan holda). Videoni yoki rasmni ko'ra olmayman demang — berilgan tavsif asosida javob bering. Faylni o'qiy olmayman demang: berilgan matn asosida tushuntiring, tahlil qiling, savollarga javob bering.
 - Sayt Word (.docx) va PowerPoint (.pptx) fayllarini o'zi tayyorlaydi: har bir javobingiz ostida «Word» va «Taqdimot» tugmalari bor, «… mavzusida taqdimot qilib bering» deb yozilsa, taqdimot avtomatik tuziladi. Fayl yarata olmayman demang — referat, hujjat yoki matn so'ralsa, uni to'liq yozing va oxirida «Word» tugmasi bilan yuklab olish mumkinligini qisqa eslating.`;
 
 function subjectInstruction(subjectId) {
@@ -360,7 +360,10 @@ app.post("/api/chat", async (req, res) => {
 const uploadHits = new Map();
 const presentationHits = new Map();
 const exportHits = new Map();
-const MAX_UPLOAD_MB = 20;
+const MAX_UPLOAD_MB = 25; // Groq Whisper bepul tarifi chegarasi ham 25 MB
+// Whisper qabul qiladigan audio/video turlari
+const TRANSCRIBE_EXT = new Set(["mp3", "wav", "m4a", "ogg", "oga", "opus", "flac", "mpga", "mpeg", "mp4", "webm"]);
+const VIDEO_EXT = new Set(["mp4", "webm", "mov", "mkv", "avi", "m4v", "3gp"]);
 const MAX_IMAGE_MB = 4; // Groq vision chegarasi (base64 bilan)
 
 app.post(
@@ -378,6 +381,8 @@ app.post(
     const abort = new AbortController();
     res.on("close", () => { if (!res.writableEnded) abort.abort(); });
     const ext = extOf(name);
+    // "video-frames" — mijoz videodan olgan kadrlar to'plami (bitta rasm); "video-audio" — video ovozini matnga aylantirish
+    const purpose = String(req.get("x-purpose") || "");
     try {
       let text;
       let kind = "document";
@@ -386,10 +391,20 @@ app.post(
         if (buf.length > MAX_IMAGE_MB * 1024 * 1024) {
           return res.status(413).json({ error: `Rasm juda katta (${MAX_IMAGE_MB} MB dan oshmasin).` });
         }
-        const description = await describeImage(buf, IMAGE_TYPES[ext], abort.signal);
+        const videoFrames = purpose === "video-frames";
+        const description = await describeImage(buf, IMAGE_TYPES[ext], abort.signal, { videoFrames });
         if (abort.signal.aborted) return;
         if (!description?.trim()) return res.status(422).json({ error: "Rasmni o'qib bo'lmadi. Boshqa rasm yuborib ko'ring." });
-        text = `[Bu rasm — uning tarkibi so'z bilan ifodalangan]\n${description.trim()}`;
+        text = videoFrames ? description.trim() : `[Bu rasm — uning tarkibi so'z bilan ifodalangan]\n${description.trim()}`;
+      } else if (TRANSCRIBE_EXT.has(ext)) {
+        kind = purpose === "video-audio" || VIDEO_EXT.has(ext) ? "video" : "audio";
+        if (!canTranscribe()) return res.status(501).json({ error: "Audio/video nutqini o'qish hozircha sozlanmagan." });
+        const speech = await transcribeAudio(buf, name, abort.signal);
+        if (abort.signal.aborted) return;
+        // Videoda nutq bo'lmasligi mumkin — bu xato emas (kadrlar baribir o'qiladi)
+        if (!speech && kind === "audio") return res.status(422).json({ error: "Audio yozuvda nutq topilmadi." });
+        text = kind === "audio" ? `[Audio yozuv — undagi nutq matnga aylantirilgan]\n${speech}` : speech || "";
+        return res.json({ name, kind, chars: text.length, truncated: false, text: text.slice(0, FILE_TEXT_MAX) });
       } else {
         text = await fileToText(buf, name);
         if (!text) {
@@ -411,6 +426,8 @@ app.post(
       }
       if (err?.status === 429) return res.status(429).json({ error: friendlyError(err) });
       console.error("Fayl o'qish xatosi:", name, err?.status, err?.message);
+      // Rasm/audio/video AI xizmati orqali o'qiladi — xato fayldan emas, xizmatdan bo'lishi mumkin
+      if (IMAGE_TYPES[ext] || TRANSCRIBE_EXT.has(ext)) return res.status(502).json({ error: friendlyError(err) });
       res.status(422).json({ error: "Faylni o'qib bo'lmadi. U buzilgan yoki parol bilan himoyalangan bo'lishi mumkin." });
     }
   },

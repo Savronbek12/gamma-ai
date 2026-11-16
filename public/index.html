@@ -62,10 +62,20 @@
 
       <div class="attach-bar" id="attachBar" hidden></div>
       <form class="composer" id="composer">
-        <button type="button" id="attachBtn" class="image-btn attach-btn" aria-label="Fayl biriktirish" title="Fayl biriktirish: PDF, Word, PowerPoint, Excel, matn, rasm">📎</button>
-        <input type="file" id="fileInput" hidden
-          accept=".pdf,.docx,.pptx,.xlsx,.odt,.odp,.ods,.txt,.md,.csv,.tsv,.json,.xml,.html,.htm,.rtf,.tex,.srt,.js,.ts,.py,.java,.c,.cpp,.cs,.go,.php,.sql,.yaml,.yml,.png,.jpg,.jpeg,.webp,.gif,image/*">
-        <button type="button" id="imageBtn" class="image-btn" aria-pressed="false" aria-label="Rasm qidirish rejimi" title="Internetdan rasm qidirish" hidden>🖼</button>
+        <div class="plus-wrap">
+          <button type="button" id="plusBtn" class="plus-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="plusMenu"
+            aria-label="Qo'shish: rasm, video, audio yoki fayl" title="Rasm, video, audio yoki fayl qo'shish">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+          </button>
+          <div class="plus-menu" id="plusMenu" role="menu" hidden>
+            <button type="button" role="menuitem" data-pick="image"><span class="pm-ico">🖼</span><span><b>Rasm yoki foto</b><small>JPG, PNG, WEBP — kamera ham</small></span></button>
+            <button type="button" role="menuitem" data-pick="video"><span class="pm-ico">🎬</span><span><b>Video</b><small>MP4, WEBM, MOV — kadrlar va nutq</small></span></button>
+            <button type="button" role="menuitem" data-pick="audio"><span class="pm-ico">🎵</span><span><b>Audio</b><small>MP3, WAV, M4A, OGG — nutq matnga</small></span></button>
+            <button type="button" role="menuitem" data-pick="file"><span class="pm-ico">📄</span><span><b>Hujjat yoki fayl</b><small>PDF, Word, PowerPoint, Excel, matn</small></span></button>
+            <button type="button" role="menuitem" data-pick="search" id="searchItem" hidden><span class="pm-ico">🔎</span><span><b>Internetdan rasm qidirish</b><small>Wikimedia, Openverse</small></span></button>
+          </div>
+        </div>
+        <input type="file" id="fileInput" hidden>
         <textarea id="input" rows="1" placeholder="Savolingizni yozing…" aria-label="Savol" maxlength="8000"></textarea>
         <button type="submit" id="sendBtn" aria-label="Yuborish">➤</button>
       </form>

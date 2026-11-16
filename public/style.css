@@ -246,8 +246,36 @@ button, input, textarea { font: inherit; color: inherit; }
 .composer .image-btn { background: var(--surface-2); color: var(--muted); box-shadow: var(--card-shadow); margin-left: -6px; }
 .composer .image-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); box-shadow: 0 3px 0 var(--accent-shadow); }
 .composer .image-btn[hidden] { display: none; }
-.composer .attach-btn + input + .image-btn { margin-left: 0; }
-.composer .attach-btn:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+/* "+" tugmasi: rasm, video, audio, fayl */
+.composer { position: relative; }
+.plus-wrap { position: relative; margin-left: -6px; flex-shrink: 0; }
+.composer .plus-btn {
+  display: grid; place-items: center; width: 40px; height: 38px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text); box-shadow: none; border: 1px solid var(--border);
+  transition: background .12s, transform .15s, border-color .12s;
+}
+.composer .plus-btn:hover:not(:disabled) { background: var(--border); }
+.composer .plus-btn:active:not(:disabled) { transform: scale(.94); box-shadow: none; }
+.composer .plus-btn[aria-expanded="true"] svg { transform: rotate(45deg); }
+.composer .plus-btn svg { transition: transform .15s; }
+.composer .plus-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.plus-menu {
+  position: absolute; left: 0; bottom: calc(100% + 12px); z-index: 30; width: 290px; max-width: calc(100vw - 40px);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .35); display: flex; flex-direction: column; gap: 2px;
+}
+.plus-menu[hidden] { display: none; }
+.composer .plus-menu button {
+  display: flex; align-items: center; gap: 12px; width: 100%; height: auto; margin: 0; padding: 9px 10px;
+  background: transparent; color: var(--text); box-shadow: none; border-radius: 8px; text-align: left; font: inherit;
+}
+.composer .plus-menu button:hover, .composer .plus-menu button:focus-visible { background: var(--surface-2); outline: none; }
+.composer .plus-menu button:active { transform: none; box-shadow: none; }
+.composer .plus-menu button[hidden] { display: none; }
+.composer .plus-menu button.on { background: var(--accent-soft); }
+.plus-menu .pm-ico { font-size: 18px; width: 24px; text-align: center; flex-shrink: 0; }
+.plus-menu b { display: block; font-size: 14px; font-weight: 700; }
+.plus-menu small { display: block; font-size: 12px; color: var(--muted); }
 
 /* Biriktirilgan fayl */
 .attach-bar { max-width: 800px; width: calc(100% - 32px); margin: 0 auto 8px; display: flex; }
