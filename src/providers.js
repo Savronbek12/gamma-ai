@@ -321,9 +321,7 @@ export async function describeImage(buf, mime, signal, { videoFrames = false } =
     return r.content.find((b) => b.type === "text")?.text;
   }
   groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
-  const models = [
-    ...new Set([process.env.VISION_MODEL, "meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"].filter(Boolean)),
-  ];
+  const models = await groqVisionModels();
   let lastErr = null;
   for (const model of models) {
     try {
@@ -332,23 +330,54 @@ export async function describeImage(buf, mime, signal, { videoFrames = false } =
           model,
           temperature: 0.1,
           max_completion_tokens: 2500,
+          // Ba'zi vision modellari rasm bilan birga "system" xabarini qabul qilmaydi — ko'rsatmani savol ichiga qo'yamiz
           messages: [
-            { role: "system", content: system },
-            { role: "user", content: [{ type: "text", text: "Rasmni o'qing." }, { type: "image_url", image_url: { url: dataUrl } }] },
+            { role: "user", content: [{ type: "text", text: `${system}\n\nRasmni o'qing.` }, { type: "image_url", image_url: { url: dataUrl } }] },
           ],
         },
         { signal },
       );
       const out = r.choices?.[0]?.message?.content;
-      if (out && out.trim()) return out;
+      if (out && out.trim()) {
+        workingVisionModel = model;
+        return out;
+      }
     } catch (err) {
       if (signal?.aborted || err?.status === 429) throw err;
       console.warn(`Vision modeli ${model} xatosi:`, err?.status, err?.message);
+      if (workingVisionModel === model) workingVisionModel = null;
       lastErr = err;
     }
   }
-  if (lastErr) throw lastErr;
-  return null;
+  if (lastErr) throw Object.assign(lastErr, { visionModels: models });
+  throw Object.assign(new Error("Groq'da rasm o'qiydigan model topilmadi"), { visionModels: models });
+}
+
+// Groq'dagi rasm o'qiy oladigan modellar: avval ishlagani, keyin sozlamadagi, keyin ro'yxatdan topilganlar.
+// Modellar vaqti-vaqti bilan almashadi, shuning uchun ro'yxat Groq'ning o'zidan olinadi (1 soat keshlanadi).
+let workingVisionModel = null;
+let visionListCache = { at: 0, ids: [] };
+const VISION_HINT = /(llama-4|vision|scout|maverick|[-_/]vl\b|-vl-|qwen.*vl|gemma-?3|pixtral|llava|kimi.*vl|multimodal)/i;
+async function groqVisionModels() {
+  if (Date.now() - visionListCache.at > 60 * 60_000) {
+    try {
+      const list = await groq.models.list();
+      const ids = (list?.data || []).filter((m) => m && m.active !== false && VISION_HINT.test(m.id)).map((m) => m.id);
+      visionListCache = { at: Date.now(), ids };
+      console.log("Groq vision modellari:", ids.join(", ") || "(topilmadi)");
+    } catch (err) {
+      console.warn("Groq modellar ro'yxatini olib bo'lmadi:", err?.status, err?.message);
+      visionListCache = { at: Date.now() - 55 * 60_000, ids: visionListCache.ids }; // 5 daqiqadan so'ng qayta urinish
+    }
+  }
+  return [
+    ...new Set(
+      [
+        workingVisionModel, process.env.VISION_MODEL, ...visionListCache.ids,
+        "meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct",
+      ].filter(Boolean),
+    ),
+  ].slice(0, 6);
 }
 
 // ---------------------------------------------------------------------------

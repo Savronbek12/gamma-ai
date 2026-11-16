@@ -441,7 +441,18 @@ app.post(
       if (err?.status === 429) return res.status(429).json({ error: friendlyError(err) });
       console.error("Fayl o'qish xatosi:", name, err?.status, err?.message);
       // Rasm/audio/video AI xizmati orqali o'qiladi — xato fayldan emas, xizmatdan bo'lishi mumkin
-      if (IMAGE_TYPES[ext] || TRANSCRIBE_EXT.has(ext)) return res.status(502).json({ error: friendlyError(err) });
+      if (IMAGE_TYPES[ext] || TRANSCRIBE_EXT.has(ext)) {
+        const generic = friendlyError(err).startsWith("Serverda xatolik");
+        return res.status(502).json({
+          error: generic
+            ? (IMAGE_TYPES[ext] ? "Rasmni o'qish xizmati hozir javob bermayapti." : "Audio/video o'qish xizmati hozir javob bermayapti.") +
+              " Iltimos, birozdan so'ng qayta urinib ko'ring."
+            : friendlyError(err),
+          // Nosozlikni aniqlash uchun (foydalanuvchiga ko'rsatilmaydi)
+          detail: `${err?.status || ""} ${String(err?.message || "").slice(0, 300)}`.trim(),
+          models: err?.visionModels,
+        });
+      }
       res.status(422).json({ error: "Faylni o'qib bo'lmadi. U buzilgan yoki parol bilan himoyalangan bo'lishi mumkin." });
     }
   },
