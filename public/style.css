@@ -70,13 +70,13 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 .brand { display: flex; align-items: center; gap: 12px; padding: 2px 6px 6px; }
 
-/* Logotip — o'zgarmaydi */
-.logo, .welcome-logo, .msg.assistant .avatar {
-  display: grid; place-items: center;
-  background: var(--logo-bg); color: var(--logo-text);
-  font-family: "Source Serif 4", Georgia, serif; font-weight: 600;
+/* Logotip — /icon.svg (o'zgarmaydi, mavzuga bog'liq emas) */
+.logo, .welcome-logo { display: block; flex-shrink: 0; }
+.msg.assistant .avatar {
+  background: url("/icon.svg") center / cover no-repeat;
+  color: transparent; font-size: 0; overflow: hidden;
 }
-.logo { width: 40px; height: 40px; border-radius: 10px; font-size: 26px; }
+.logo { width: 40px; height: 40px; }
 .brand-name { font-family: "Source Serif 4", Georgia, serif; font-size: 20px; font-weight: 600; line-height: 1.1; }
 .brand-sub { color: var(--muted); font-size: 12.5px; font-weight: 600; }
 
@@ -161,7 +161,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .chat > * { max-width: 800px; margin-left: auto; margin-right: auto; }
 
 .welcome { text-align: center; padding: 6vh 0 20px; }
-.welcome-logo { width: 64px; height: 64px; border-radius: 16px; font-size: 42px; margin: 0 auto 18px; }
+.welcome-logo { width: 72px; height: 72px; margin: 0 auto 18px; box-shadow: 0 6px 20px rgba(10, 16, 30, .35); border-radius: 17%; }
 .welcome h1 { font-weight: 800; font-size: 34px; line-height: 1.2; letter-spacing: -.01em; margin: 0 0 12px; }
 .welcome p { color: var(--muted); font-size: 16px; max-width: 580px; margin: 0 auto 28px; }
 .suggestions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; text-align: left; }
@@ -180,7 +180,7 @@ button, input, textarea { font: inherit; color: inherit; }
   background: var(--user-bubble); color: var(--user-text); font-weight: 600;
   padding: 10px 14px; border-radius: 10px 10px 3px 10px; max-width: 85%; white-space: pre-wrap; word-wrap: break-word;
 }
-.msg.assistant .avatar { width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0; font-size: 18px; }
+.msg.assistant .avatar { width: 30px; height: 30px; border-radius: 6px; flex-shrink: 0; }
 .msg.assistant .bubble {
   flex: 1; min-width: 0;
   background: var(--surface); border-radius: 3px 10px 10px 10px; padding: 12px 16px;

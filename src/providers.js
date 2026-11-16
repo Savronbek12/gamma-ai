@@ -81,7 +81,7 @@ export async function streamAnswer(args) {
   return streamGroq(args);
 }
 
-async function streamGroq({ systemParts, messages, signal, onText, maxTokens }) {
+async function streamGroq({ systemParts, messages, signal, onText, maxTokens, reasoningEffort }) {
   // GROQ_API_KEY muhit o'zgaruvchisidan olinadi. Qayta urinishlar kam — aks holda xato juda kech chiqadi.
   // Qayta urinishlarni server.js o'zi boshqaradi (limitda kutish, tarixni qisqartirish)
   groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
@@ -91,8 +91,9 @@ async function streamGroq({ systemParts, messages, signal, onText, maxTokens }) 
       stream: true,
       // Fikrlash + javob uchun chegara. Groq bepul tarifi bu qiymatni ham daqiqalik token limitiga qo'shib hisoblaydi.
       max_completion_tokens: maxTokens || Number(process.env.MAX_OUTPUT_TOKENS) || 3500,
-      // "high" — javobdan oldin chuqurroq o'ylaydi (faktik xatolar kamroq, biroz sekinroq)
-      reasoning_effort: process.env.REASONING_EFFORT || "high",
+      // Fikrlash tokenlari ham max_completion_tokens ichida hisoblanadi: "high" da fikrlash butun chegarani
+      // egallab, javob bo'sh yoki chala qolardi. "medium" — aniqlik va javob uzunligi o'rtasidagi muvozanat.
+      reasoning_effort: reasoningEffort || process.env.REASONING_EFFORT || "medium",
       reasoning_format: "hidden", // fikrlash jarayoni foydalanuvchiga ko'rsatilmaydi
       messages: [
         { role: "system", content: systemParts.join("\n\n") },

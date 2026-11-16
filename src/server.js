@@ -159,8 +159,12 @@ app.post("/api/chat", async (req, res) => {
 
   const abort = new AbortController();
   let closed = false;
+  // Model jim "o'ylayotganda" ulanish bo'sh qolib, proksi yoki mobil tarmoq uni uzib qo'ymasligi uchun
+  // har 15 soniyada SSE izohi yuboramiz (mijoz uni e'tiborsiz qoldiradi)
+  const heartbeat = setInterval(() => { if (!closed) res.write(": ping\n\n"); }, 15_000);
   res.on("close", () => {
     closed = true;
+    clearInterval(heartbeat);
     abort.abort();
   });
 
@@ -220,7 +224,25 @@ app.post("/api/chat", async (req, res) => {
       }
     }
     if (closed) return;
-    if (stop === "refusal") {
+    // Model butun chegarani fikrlashga sarflab, birorta ham so'z yozmagan bo'lsa —
+    // kamroq fikrlash va qisqaroq tarix bilan bir marta qayta urinamiz
+    if (!sentText && stop !== "refusal") {
+      console.warn(`Bo'sh javob (${stop}), kamroq fikrlash bilan qayta urinilmoqda`);
+      stop = await streamAnswer({
+        systemParts,
+        messages: trimHistory(messages, Math.floor(historyBudget / 2)),
+        reasoningEffort: "low",
+        signal: abort.signal,
+        onText: (text) => {
+          sentText = true;
+          if (!closed) send("delta", { text });
+        },
+      });
+      if (closed) return;
+    }
+    if (!sentText && stop !== "refusal") {
+      send("error", { error: "Javob olinmadi. Iltimos, savolni qayta yuboring yoki qisqaroq ifodalang." });
+    } else if (stop === "refusal") {
       send("error", { error: "Kechirasiz, ushbu so'rovga javob bera olmayman. Iltimos, savolni boshqacha ifodalang." });
     } else {
       send("done", { truncated: stop === "max_tokens" });
@@ -230,6 +252,7 @@ app.post("/api/chat", async (req, res) => {
     console.error(`${PROVIDER} API xatosi:`, err);
     send("error", { error: friendlyError(err) });
   } finally {
+    clearInterval(heartbeat);
     if (!closed) res.end();
   }
 });
@@ -305,8 +328,27 @@ app.post("/api/image-search", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// Kutilmagan xato butun serverni yiqitmasin — faqat logga yozamiz
+process.on("unhandledRejection", (err) => console.error("Ushlanmagan xato (promise):", err));
+process.on("uncaughtException", (err) => console.error("Ushlanmagan xato:", err));
+
+const server = app.listen(PORT, () => {
   console.log(`Gamma AI ishga tushdi: http://localhost:${PORT}  (provayder: ${PROVIDER}, model: ${MODEL})`);
   const warning = missingKeyWarning();
   if (warning) console.warn(warning);
 });
+// Proksi (Render) ulanishni qayta ishlatganda "502/uzilish" bo'lmasligi uchun keep-alive proksinikidan uzunroq
+server.keepAliveTimeout = 120_000;
+server.headersTimeout = 125_000;
+
+// Render bepul tarifi 15 daqiqa so'rov bo'lmasa saytni "uxlatadi" va keyingi ochilish ~1 daqiqa kutadi.
+// Shuning uchun har 10 daqiqada o'zimizning tashqi manzilimizga so'rov yuborib, saytni uyg'oq tutamiz.
+const SELF_URL = process.env.KEEP_ALIVE_URL || process.env.RENDER_EXTERNAL_URL;
+if (SELF_URL && process.env.KEEP_ALIVE !== "off") {
+  setInterval(() => {
+    fetch(new URL("/healthz", SELF_URL), { signal: AbortSignal.timeout(30_000) }).catch((err) =>
+      console.warn("Keep-alive so'rovi xatosi:", err?.message),
+    );
+  }, 10 * 60_000);
+  console.log(`Keep-alive yoqildi: ${SELF_URL}`);
+}
