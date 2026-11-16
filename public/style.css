@@ -243,22 +243,19 @@ button, input, textarea { font: inherit; color: inherit; }
 .composer button:hover:not(:disabled) { background: var(--accent-hover); }
 .composer button:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 var(--accent-shadow); }
 .composer button:disabled { opacity: .45; cursor: not-allowed; }
-.composer .image-btn { background: var(--surface-2); color: var(--muted); box-shadow: var(--card-shadow); margin-left: -6px; }
-.composer .image-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); box-shadow: 0 3px 0 var(--accent-shadow); }
-.composer .image-btn[hidden] { display: none; }
-/* "+" tugmasi: rasm, video, audio, fayl */
+/* "+" tugmasi: rasm, video, audio, fayl — faqat "+" belgisi */
 .composer { position: relative; }
-.plus-wrap { position: relative; margin-left: -6px; flex-shrink: 0; }
+.plus-wrap { position: relative; margin-left: -8px; flex-shrink: 0; }
 .composer .plus-btn {
-  display: grid; place-items: center; width: 40px; height: 38px; border-radius: 999px;
-  background: var(--surface-2); color: var(--text); box-shadow: none; border: 1px solid var(--border);
-  transition: background .12s, transform .15s, border-color .12s;
+  display: grid; place-items: center; width: 36px; height: 38px; border-radius: 8px;
+  background: transparent; color: var(--muted); box-shadow: none; border: 0;
+  font-size: 28px; font-weight: 300; line-height: 1; padding: 0 0 3px;
+  transition: color .12s, transform .15s;
 }
-.composer .plus-btn:hover:not(:disabled) { background: var(--border); }
-.composer .plus-btn:active:not(:disabled) { transform: scale(.94); box-shadow: none; }
-.composer .plus-btn[aria-expanded="true"] svg { transform: rotate(45deg); }
-.composer .plus-btn svg { transition: transform .15s; }
-.composer .plus-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.composer .plus-btn:hover:not(:disabled) { background: transparent; color: var(--text); }
+.composer .plus-btn:active:not(:disabled) { transform: scale(.9); box-shadow: none; }
+.composer .plus-btn[aria-expanded="true"] { transform: rotate(45deg); color: var(--text); }
+.composer .plus-btn.active { color: var(--accent); }
 .plus-menu {
   position: absolute; left: 0; bottom: calc(100% + 12px); z-index: 30; width: 290px; max-width: calc(100vw - 40px);
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 6px;

@@ -113,7 +113,8 @@ function load() {
       }
     }
   } catch {}
-  chat = store.chats.find((c) => c.id === store.currentId) || newDraft();
+  // Sayt har ochilganda yangi suhbat boshlanadi; avvalgilari yon panelda saqlanib qoladi
+  chat = newDraft();
   save();
   try { localStorage.removeItem(OLD_STORAGE_KEY); } catch {}
 }
