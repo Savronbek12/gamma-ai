@@ -8,6 +8,7 @@ import { searchImages } from "./imagesearch.js";
 import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs, generateTitle, imageSearchQuery, describeImage, completeJSON, transcribeAudio, canTranscribe } from "./providers.js";
 import { fileToText, extOf, IMAGE_TYPES } from "./fileparse.js";
 import { buildPptx, buildDocx, normalizeDeck, safeFileName } from "./export.js";
+import { findDeckImages } from "./slideimages.js";
 
 const MAX_RATE_WAIT_MS = 45_000; // daqiqalik limitda foydalanuvchini ko'pi bilan shuncha kuttiramiz
 const sleep = (ms, signal) =>
@@ -59,7 +60,7 @@ Cheklovlar:
 - O'quvchilarning nazorat ishlari va imtihonlarida aldashga emas, mavzuni chuqur tushunishga yordam bering.
 - Siz rasm chizmaysiz va yaratmaysiz. Foydalanuvchi rasm so'rasa, sayt uni ochiq internetdan (Wikimedia Commons, Openverse) avtomatik qidirib beradi; agar so'rov sizga kelib qolsa, «… rasmini topib bering» deb yozish yoki «+» menyusidagi «Internetdan rasm qidirish» bandini tanlash mumkinligini qisqa ayting.
 - Foydalanuvchi «+» tugmasi orqali fayl (PDF, Word, PowerPoint, Excel, matn, kod, rasm, video, audio) biriktira oladi — uning matni sizga beriladi (rasm va video kadrlari so'z bilan tasvirlangan, audio va video nutqi matnga aylantirilgan holda). Videoni yoki rasmni ko'ra olmayman demang — berilgan tavsif asosida javob bering. Faylni o'qiy olmayman demang: berilgan matn asosida tushuntiring, tahlil qiling, savollarga javob bering.
-- Sayt Word (.docx) va PowerPoint (.pptx) fayllarini o'zi tayyorlaydi: har bir javobingiz ostida «Word» va «Taqdimot» tugmalari bor, «… mavzusida taqdimot qilib bering» deb yozilsa, taqdimot avtomatik tuziladi. Fayl yarata olmayman demang — referat, hujjat yoki matn so'ralsa, uni to'liq yozing va oxirida «Word» tugmasi bilan yuklab olish mumkinligini qisqa eslating.`;
+- Sayt Word (.docx) va PowerPoint (.pptx) fayllarini o'zi tayyorlaydi: «… mavzusida taqdimot qilib bering» deb yozilsa — taqdimot fayli, «… referat (hujjat, mustaqil ish) tayyorlab bering» deb yozilsa — Word fayli avtomatik beriladi. Fayl yarata olmayman demang; foydalanuvchi fayl so'rasa, shunday yozishni maslahat bering.`;
 
 function subjectInstruction(subjectId) {
   const subject = SUBJECTS.find((s) => s.id === subjectId);
@@ -119,6 +120,14 @@ function validateMessages(messages) {
   if (messages.at(-1).role !== "user") return "Oxirgi xabar foydalanuvchidan bo'lishi kerak.";
   return null;
 }
+
+// Foydalanuvchi referat, hujjat va shunga o'xshash ish so'raganda — javob Word faylga aylantiriladi
+const DOCUMENT_INSTRUCTION = `Hujjat rejimi: foydalanuvchi tayyor ish (referat, mustaqil ish, insho, maqola, hujjat, konspekt, test va h.k.) so'radi.
+Javobingiz to'g'ridan-to'g'ri Word (.docx) faylga aylantiriladi va foydalanuvchiga fayl ko'rinishida beriladi. Shuning uchun:
+- Faqat hujjatning o'zini yozing: "Mana referat", "Umid qilamanki" kabi chat izohlari, Word tugmasi haqidagi eslatmalar yozmang.
+- Birinchi qator — "# " bilan boshlanadigan hujjat nomi. So'ng (mos bo'lsa) "## Reja", "## Kirish", 3–5 ta asosiy bo'lim (## sarlavhalar, kerak bo'lsa ### kichik sarlavhalar), "## Xulosa".
+- Matn to'liq, izchil, akademik uslubda, xatboshilarga bo'lingan bo'lsin; kerak joyda ro'yxat va jadval ishlating.
+- Oxirida "## Foydalanilgan adabiyotlar" — faqat haqiqatan mavjud manbalar (ishonchingiz komil bo'lmasa — umumiy, mashhur darsliklar).`;
 
 // ---------------------------------------------------------------------------
 // Biriktirilgan fayllar
@@ -227,6 +236,7 @@ app.post("/api/chat", async (req, res) => {
     return res.status(429).json({ error: "Juda ko'p so'rov yuborildi. Iltimos, bir daqiqadan so'ng qayta urinib ko'ring." });
   }
   const { messages, subject } = req.body || {};
+  const documentMode = req.body?.mode === "document";
   const problem = validateMessages(messages);
   if (problem) return res.status(400).json({ error: problem });
 
@@ -263,7 +273,11 @@ app.post("/api/chat", async (req, res) => {
         });
     if (closed) return;
     if (wiki) send("sources", { sources: wiki.sources });
-    const baseParts = [BASE_SYSTEM, subjectInstruction(subject), ...(wiki ? [wikipediaInstruction(wiki.context)] : [])];
+    const baseParts = [
+      BASE_SYSTEM, subjectInstruction(subject),
+      ...(wiki ? [wikipediaInstruction(wiki.context)] : []),
+      ...(documentMode ? [DOCUMENT_INSTRUCTION] : []),
+    ];
     const fileMessages = messages;
     const withFileParts = (share) => {
       const ctx = fileContext(fileMessages, Math.floor(FILE_CHAR_BUDGET * share));
@@ -278,7 +292,7 @@ app.post("/api/chat", async (req, res) => {
     // Model "so'rov juda katta" desa, foydalanuvchiga xato ko'rsatmasdan
     // qisqaroq tarix va kichikroq javob chegarasi bilan qayta urinamiz.
     const attempts = [
-      { budget: historyBudget },
+      { budget: historyBudget, ...(documentMode ? { maxTokens: 5000 } : {}) },
       { budget: Math.floor(historyBudget / 3), maxTokens: 2500, fileShare: 0.6 },
       { budget: 0, maxTokens: 2000, fileShare: 0.4 }, // faqat oxirgi savol
     ];
@@ -441,16 +455,32 @@ app.post(
 // ---------------------------------------------------------------------------
 // Taqdimot: model slaydlar rejasini JSON qilib tuzadi, mijoz uni ko'rsatadi va .pptx qilib yuklaydi
 // ---------------------------------------------------------------------------
-const PRESENTATION_SYSTEM = `Siz — Gamma AI, ilmiy-akademik taqdimotlar tayyorlovchi professor.
-Foydalanuvchi so'rovi (va berilgan bo'lsa, fayl yoki matn) asosida taqdimot tuzing.
-Talablar:
-- So'rov tilida yozing (standart — o'zbek tili, lotin yozuvi, adabiy til me'yorlarida, O'zbekiston darsliklaridagi ilmiy atamalar bilan).
-- Odatda 8–12 ta slayd (foydalanuvchi son aytsa — o'shancha, ko'pi bilan 20). Birinchi slayd — reja/kirish, oxirgisi — xulosa.
-- Har bir slaydda 3–6 ta qisqa, mazmunli band (har biri ko'pi bilan ~25 so'z). Faqat aniq bilgan faktlarni yozing, to'qib chiqarmang.
-- "notes" — ma'ruzachi uchun 2–4 gaplik izoh.
-- Formulalarni oddiy matn bilan yozing (masalan: E = mc^2), LaTeX ishlatmang.
-Faqat quyidagi JSON obyektini qaytaring, boshqa hech narsa yozmang:
-{"title": "...", "subtitle": "...", "slides": [{"title": "...", "bullets": ["...", "..."], "notes": "..."}]}`;
+const PRESENTATION_SYSTEM = `Siz — Gamma AI, ilmiy-akademik taqdimotlar tayyorlovchi professor va dizayner.
+Foydalanuvchi so'rovi (va berilgan bo'lsa, fayl yoki matn) asosida boy, tushunarli va ko'rgazmali taqdimot tuzing.
+Til: so'rov tilida (standart — o'zbek tili, lotin yozuvi, adabiy me'yorlarda, O'zbekiston darsliklaridagi ilmiy atamalar bilan).
+Tuzilishi:
+- 10–12 ta slayd (foydalanuvchi son aytsa — o'shancha, 6–18). Reja (mundarija) slaydini YOZMANG — u avtomatik qo'shiladi.
+  Birinchi slayd — kirish (mavzu nima va nega muhim), oxirgisi — xulosa.
+- Slaydlar turli ko'rinishda bo'lsin ("layout"): kamida 4 xil ko'rinish ishlating, bir xil ko'rinish ketma-ket 2 tadan oshmasin:
+  "bullets" — asosiy tushuntirish: "bullets" ichida 3–5 band, har biri to'liq va tushunarli 1–2 gap (15–35 so'z), misol yoki izoh bilan;
+  "two_column" — ikki jihat (masalan, sabab/oqibat, turlar): "columns" ichida 2 ta {"heading", "points": 3–4 band, har biri 8–20 so'z};
+  "comparison" — ikki narsani solishtirish (xuddi two_column kabi);
+  "stats" — muhim raqamlar: "stats" ichida 3–4 ta {"value": "qisqa raqam/kattalik", "label": "5–12 so'zli izoh"} va 1–2 ta "bullets" xulosa. FAQAT aniq bilgan raqamlar!;
+  "timeline" — tarixiy bosqichlar yoki jarayon qadamlari: "steps" ichida 3–6 ta {"label": "yil yoki qisqa nom", "text": "8–20 so'z"};
+  "quote" — mashhur olim yoki shaxsning HAQIQIY iqtibosi: "quote", "author" (ishonchingiz komil bo'lmasa bu ko'rinishni ishlatmang).
+- Har bir slaydda "lead" — slayd g'oyasini ochadigan 1 ta gap (10–20 so'z).
+- "image" — slaydga mos rasm uchun INGLIZCHA qidiruv so'rovi: 1–3 so'z, Wikipedia maqolasi nomidek aniq narsa
+  (masalan "Chloroplast", "Amir Timur", "Registan", "DNA double helix"). Kamida 6 ta slaydda rasm bo'lsin; mavhum slaydlarda "".
+- Taqdimot uchun ham "image" — titul slayd rasmi (mavzuning eng tanish tasviri).
+- "notes" — ma'ruzachi uchun 2–3 gap.
+- Faqat aniq bilgan faktlarni yozing, to'qib chiqarmang. Formulalarni oddiy matn bilan yozing (E = mc^2), LaTeX ishlatmang.
+Faqat JSON obyektini qaytaring, boshqa hech narsa yozmang:
+{"title": "...", "subtitle": "...", "image": "...", "slides": [
+ {"layout": "bullets", "title": "...", "lead": "...", "bullets": ["...", "..."], "image": "...", "notes": "..."},
+ {"layout": "two_column", "title": "...", "lead": "...", "columns": [{"heading": "...", "points": ["..."]}, {"heading": "...", "points": ["..."]}], "image": "", "notes": "..."},
+ {"layout": "stats", "title": "...", "lead": "...", "stats": [{"value": "...", "label": "..."}], "bullets": ["..."], "image": "...", "notes": "..."},
+ {"layout": "timeline", "title": "...", "lead": "...", "steps": [{"label": "...", "text": "..."}], "notes": "..."},
+ {"layout": "quote", "title": "...", "quote": "...", "author": "...", "image": "...", "notes": "..."}]}`;
 
 app.post("/api/presentation", async (req, res) => {
   if (rateLimited(req.ip, presentationHits, 5)) {
@@ -478,15 +508,23 @@ app.post("/api/presentation", async (req, res) => {
   const abort = new AbortController();
   res.on("close", () => { if (!res.writableEnded) abort.abort(); });
   let waited = 0;
+  let shorter = false;
   for (;;) {
     try {
-      const raw = await completeJSON(PRESENTATION_SYSTEM, parts.join("\n\n"), { maxTokens: 5000, signal: abort.signal });
+      // JSON chala qolsa (javob chegarasiga yetsa), ikkinchi urinishda qisqaroq taqdimot so'raymiz
+      const request = parts.join("\n\n") + (shorter ? "\n\nMuhim: 8 ta slayddan oshmasin, bandlar qisqaroq bo'lsin." : "");
+      const raw = await completeJSON(PRESENTATION_SYSTEM, request, { maxTokens: 6500, signal: abort.signal });
       if (abort.signal.aborted) return;
       const deck = normalizeDeck(raw);
       if (!deck.slides.length) throw new Error("Bo'sh taqdimot");
       return res.json({ deck });
     } catch (err) {
       if (abort.signal.aborted) return;
+      if (!err?.status && !shorter) {
+        console.warn("Taqdimot JSON xatosi, qisqaroq qayta urinilmoqda:", err?.message);
+        shorter = true;
+        continue;
+      }
       const wait = rateLimitWaitMs(err);
       if (wait !== null && waited + wait <= MAX_RATE_WAIT_MS) {
         waited += wait + 500;
@@ -541,7 +579,12 @@ app.post("/api/export/pptx", async (req, res) => {
   const deck = normalizeDeck(req.body?.deck);
   if (!deck.slides.length) return res.status(400).json({ error: "Taqdimot bo'sh." });
   try {
-    const buf = await buildPptx(deck);
+    // Slaydlar uchun ochiq internetdan rasmlar (topilmasa — rasmsiz)
+    const abort = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+    const images = await findDeckImages(deck, abort.signal).catch(() => ({}));
+    if (abort.signal.aborted) return;
+    const buf = await buildPptx(deck, images);
     sendFile(res, buf, safeFileName(deck.title, "pptx"), "application/vnd.openxmlformats-officedocument.presentationml.presentation");
   } catch (err) {
     console.error("PPTX xatosi:", err?.message);

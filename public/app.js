@@ -63,6 +63,7 @@ function cleanMessages(list) {
       };
     }
     if (m.role === "assistant" && m.deck && Array.isArray(m.deck.slides)) item.deck = m.deck;
+    if (m.role === "assistant" && m.doc && typeof m.doc.title === "string") item.doc = { title: m.doc.title.slice(0, 150) };
     if (m.role === "assistant" && Array.isArray(m.sources)) item.sources = m.sources;
     if (m.role === "assistant" && typeof m.image === "string" && m.image.startsWith("data:image/")) item.image = m.image;
     if (m.role === "assistant" && m.imageLost) item.imageLost = true;
@@ -262,9 +263,9 @@ function addMessageEl(role, content, sources, msg) {
     bubble.appendChild(document.createTextNode(content));
   } else if (msg && msg.images) bubble.innerHTML = galleryHtml(msg);
   else if (msg && (msg.image || msg.imageLost)) bubble.innerHTML = imageMessageHtml(msg);
-  else if (msg && msg.deck) bubble.innerHTML = deckHtml(msg.deck);
+  else if (msg && msg.deck) renderDeckMessage(bubble, msg);
+  else if (msg && msg.doc) renderDocMessage(bubble, msg);
   else bubble.innerHTML = content ? renderMarkdown(content) + sourcesHtml(sources) : "";
-  if (role === "assistant" && msg && !msg.images && !msg.image && !msg.imageLost) bubble.appendChild(actionsEl(msg));
   wrap.appendChild(bubble);
   chatEl.appendChild(wrap);
   return bubble;
@@ -314,22 +315,16 @@ function fileChipEl(file, { status, onRemove } = {}) {
   return chip;
 }
 
-// ---------- Taqdimot ----------
-function deckHtml(deck) {
-  const slides = deck.slides
-    .map((s) => `<li><strong>${escapeHtml(s.title || "")}</strong>${s.bullets?.length ? `<ul>${s.bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}</ul>` : ""}</li>`)
-    .join("");
-  return `<p><strong>Taqdimot tayyor: «${escapeHtml(deck.title)}»</strong> — ${deck.slides.length + 1} ta slayd (titul bilan). Quyida reja; PowerPoint faylini yuklab oling.</p>
-    <div class="deck-outline"><ol>${slides}</ol></div>`;
-}
+// ---------- Tayyorlangan fayllar (taqdimot, Word hujjat) ----------
+const safeName = (t) => String(t || "Gamma AI").replace(/[\\/:*?"<>|\n\r\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "Gamma AI";
 const deckOutlineText = (deck) =>
   `Taqdimot: «${deck.title}»${deck.subtitle ? ` — ${deck.subtitle}` : ""}\n\n` +
-  deck.slides.map((s, i) => `${i + 1}. ${s.title}\n${(s.bullets || []).map((b) => `   - ${b}`).join("\n")}`).join("\n");
-const deckMarkdown = (deck) =>
-  `${deck.subtitle ? `*${deck.subtitle}*\n\n` : ""}` +
-  deck.slides.map((s) => `## ${s.title}\n\n${(s.bullets || []).map((b) => `- ${b}`).join("\n")}`).join("\n\n");
+  deck.slides.map((s, i) => `${i + 1}. ${s.title}${s.lead ? ` — ${s.lead}` : ""}`).join("\n");
+// Hujjat nomi: javobdagi birinchi "# " sarlavha, bo'lmasa suhbat nomi
+const docTitle = (markdown, fallback) => (/^#\s+(.+)$/m.exec(markdown)?.[1] || fallback || "Gamma AI hujjati").replace(/[*_`#]/g, "").trim().slice(0, 150);
+const wordCount = (t) => (String(t).match(/\S+/g) || []).length;
 
-// ---------- Fayl yuklab olish (server vaqtinchalik havola beradi — Android ilovada ham ishlaydi) ----------
+// Fayl serverda yasaladi va vaqtinchalik havola orqali yuklanadi (Android ilovada ham ishlaydi)
 async function downloadExport(endpoint, body) {
   const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
@@ -344,39 +339,79 @@ async function downloadExport(endpoint, body) {
 const exportDeck = (deck) => downloadExport("/api/export/pptx", { deck });
 const exportWord = (title, markdown) => downloadExport("/api/export/docx", { title, markdown });
 
-function actionsEl(msg) {
-  const box = document.createElement("div");
-  box.className = "msg-actions";
-  const err = document.createElement("span");
-  err.className = "act-error";
-  const button = (label, cls, run) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.textContent = label;
-    if (cls) b.className = cls;
-    b.addEventListener("click", async () => {
-      err.textContent = "";
-      b.disabled = true;
-      try { await run(); } catch (e) { err.textContent = e.message || "Xatolik yuz berdi."; }
-      b.disabled = false;
-    });
-    box.appendChild(b);
+function fileCardEl({ type, name, meta, download, autoStart }) {
+  const card = document.createElement("div");
+  card.className = "file-card";
+  card.innerHTML = `<div class="fc-icon ${type}">${type.toUpperCase()}</div><div class="fc-info"><b></b><small></small></div><button type="button" class="fc-dl">⬇ Yuklab olish</button>`;
+  card.querySelector("b").textContent = name;
+  card.querySelector("b").title = name;
+  card.querySelector("small").textContent = meta;
+  const btn = card.querySelector(".fc-dl");
+  const err = document.createElement("p");
+  err.className = "fc-error";
+  const run = async () => {
+    err.textContent = "";
+    btn.disabled = true;
+    btn.textContent = "Tayyorlanmoqda…";
+    try {
+      await download();
+    } catch (e) {
+      err.textContent = e.message || "Faylni tayyorlab bo'lmadi.";
+    }
+    btn.disabled = false;
+    btn.textContent = "⬇ Yuklab olish";
   };
-  if (msg.deck) {
-    button("⬇ PowerPoint (.pptx)", "primary", () => exportDeck(msg.deck));
-    button("⬇ Word (.docx)", "", () => exportWord(msg.deck.title, deckMarkdown(msg.deck)));
-  } else {
-    button("⬇ Word", "", () => exportWord(chat.title || "Gamma AI javobi", msg.content));
-    button("📊 Taqdimot", "", async () => {
-      if (busy) throw new Error("Avvalgi so'rov tugashini kuting.");
-      const idx = chat.messages.indexOf(msg);
-      const question = idx > 0 ? chat.messages[idx - 1].content : chat.title || "";
-      sendPresentation("Yuqoridagi javob asosida taqdimot tayyorlab bering.", { source: msg.content, topic: question });
-    });
-  }
-  box.appendChild(err);
-  return box;
+  btn.addEventListener("click", run);
+  if (autoStart) run();
+  const wrap = document.createElement("div");
+  wrap.append(card, err);
+  return wrap;
 }
+
+function renderDeckMessage(bubble, msg, autoStart = false) {
+  const deck = msg.deck;
+  bubble.innerHTML = "";
+  const head = document.createElement("p");
+  head.className = "fc-head";
+  head.textContent = "Taqdimot tayyor — rasmlar va diagrammalar bilan bezatilgan PowerPoint fayli:";
+  bubble.append(
+    head,
+    fileCardEl({
+      type: "pptx", name: `${safeName(deck.title)}.pptx`,
+      meta: `${deck.slides.length + 3} ta slayd · PowerPoint`,
+      download: () => exportDeck(deck), autoStart,
+    }),
+  );
+  const details = document.createElement("details");
+  details.className = "fc-details";
+  details.innerHTML = "<summary>Slaydlar ro'yxati</summary><ol></ol>";
+  for (const s of deck.slides) {
+    const li = document.createElement("li");
+    li.textContent = s.title;
+    details.querySelector("ol").appendChild(li);
+  }
+  bubble.appendChild(details);
+}
+
+function renderDocMessage(bubble, msg, autoStart = false) {
+  bubble.innerHTML = "";
+  const head = document.createElement("p");
+  head.className = "fc-head";
+  head.textContent = "Hujjat tayyor — Word fayli:";
+  bubble.append(
+    head,
+    fileCardEl({
+      type: "docx", name: `${safeName(msg.doc.title)}.docx`,
+      meta: `Word hujjat · ${wordCount(msg.content)} so'z`,
+      download: () => exportWord(msg.doc.title, msg.content), autoStart,
+    }),
+  );
+  const details = document.createElement("details");
+  details.className = "fc-details";
+  details.innerHTML = `<summary>Matnni shu yerda ko'rish</summary><div class="fc-preview">${renderMarkdown(msg.content)}</div>`;
+  bubble.appendChild(details);
+}
+
 function renderAll() {
   chatEl.querySelectorAll(".msg").forEach((n) => n.remove());
   welcomeEl.hidden = chat.messages.length > 0;
@@ -867,7 +902,10 @@ const CREATE_WORD = /(\bber|qil|tayyorla|yasa|tuz|yarat|kerak|chiqar|make|create
 const EXPLAIN_WORD = /(tushuntir|izohla|tahlil|o['ʻ’`]?qib|o['ʻ’`]?qi\b|xulosa|mazmun|nima\s+haqida|explain|summar|analy|объясн|анализ|перескаж)/i;
 // "Fotosintez mavzusida taqdimot qilib bering" — ha; "bu taqdimotni tushuntirib bering" — yo'q (oddiy javob)
 const wantsPresentation = (text) => PRESENTATION_WORD.test(text) && CREATE_WORD.test(text) && !EXPLAIN_WORD.test(text);
-const WORD_INTENT = /(\bword\b|docx|\.doc\b|referat|hujjat\s+(qilib|tayyorla|yoz)|fayl\s*(qilib|ko['ʻ’`]?rinishida|ga)|файл|реферат|документ)/i;
+// "Fotosintez haqida referat tayyorlang", "mustaqil ish yozib bering", "Word fayl qilib bering" — javob Word fayl bo'ladi
+const DOC_WORD =
+  /(\bword\b|docx|\.doc\b|referat|mustaqil\s+ish|kurs\s+ish|diplom|insho|\besse\b|maqola|hujjat|konspekt|ishlanma|bayonnoma|ariza|test\s+savol|fayl|реферат|доклад|эссе|курсов|документ|файл|essay|report|document)/i;
+const wantsDocument = (text) => DOC_WORD.test(text) && (CREATE_WORD.test(text) || /yoz/i.test(text)) && !EXPLAIN_WORD.test(text);
 
 // Taqdimot: server slaydlar rejasini tuzadi, keyin .pptx avtomatik yuklab olinadi
 async function sendPresentation(text, { file = null, source = null, topic = null } = {}) {
@@ -881,7 +919,7 @@ async function sendPresentation(text, { file = null, source = null, topic = null
   pushUserMessage(c, text, file);
   addMessageEl("user", text, null, file ? { file } : null);
   const bubble = addMessageEl("assistant", "");
-  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div><p class="note">Taqdimot tayyorlanmoqda — slaydlar tuzilmoqda (odatda 20–60 soniya)…</p>';
+  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div><p class="note">Taqdimot tayyorlanmoqda — slaydlar tuziladi va rasmlar qo\'shiladi (odatda 30–90 soniya)…</p>';
   scrollDown(true);
   controller = new AbortController();
 
@@ -916,10 +954,7 @@ async function sendPresentation(text, { file = null, source = null, topic = null
     c.messages.push(msg);
     c.updatedAt = Date.now();
     save();
-    const wrap = bubble.parentElement;
-    wrap.remove();
-    addMessageEl("assistant", msg.content, null, msg);
-    exportDeck(deck).catch(() => {}); // tugma ham bor — avtomatik yuklash o'xshamasa, foydalanuvchi bosadi
+    renderDeckMessage(bubble, msg, true); // fayl avtomatik yuklanadi; kartochkadagi tugma bilan qayta yuklash mumkin
   } else {
     bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Taqdimotni tuzib bo'lmadi.")}</p>`;
     dropUnanswered(c);
@@ -938,7 +973,7 @@ async function send(text) {
   if (wantsPresentation(text)) return sendPresentation(text, { file: takeAttachment() });
   if (!file && imagesAvailable && (imageMode || wantsImage(text))) return sendImage(text);
   takeAttachment();
-  const wantsWord = WORD_INTENT.test(text);
+  const wantsWord = wantsDocument(text);
   busy = true;
   updateSendBtn();
   inputEl.value = "";
@@ -963,7 +998,7 @@ async function send(text) {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: chatPayload(c.messages), subject: c.subject }),
+      body: JSON.stringify({ messages: chatPayload(c.messages), subject: c.subject, ...(wantsWord ? { mode: "document" } : {}) }),
       signal: controller.signal,
     });
     if (!res.ok || !res.body) {
@@ -1020,14 +1055,18 @@ async function send(text) {
     let html = renderMarkdown(answer) + sourcesHtml(sources);
     if (truncated) html += '<p class="note">Javob uzunlik chegarasiga yetdi. Davom ettirish uchun «Davom eting» deb yozing.</p>';
     if (errorText) html += `<p class="error">${escapeHtml(errorText)}</p>`;
-    bubble.innerHTML = html;
     const msg = sources.length ? { role: "assistant", content: answer, sources } : { role: "assistant", content: answer };
-    bubble.appendChild(actionsEl(msg));
+    // "Referat tayyorlang", "Word fayl qilib bering" kabi so'rovlarda javob fayl ko'rinishida beriladi
+    if (wantsWord && !errorText) {
+      msg.doc = { title: docTitle(answer, c.title || provisionalTitle(text)) };
+      renderDocMessage(bubble, msg, true);
+      if (truncated) bubble.insertAdjacentHTML("beforeend", '<p class="note">Hujjat uzunlik chegarasiga yetdi. Davomini olish uchun «Davom eting» deb yozing.</p>');
+    } else {
+      bubble.innerHTML = html;
+    }
     c.messages.push(msg);
     c.updatedAt = Date.now();
     save();
-    // "Word fayl qilib bering", "referat yozing" kabi so'rovlarda .docx avtomatik yuklanadi
-    if (wantsWord && !errorText) exportWord(c.title || provisionalTitle(text), answer).catch(() => {});
   } else {
     bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Javob olinmadi.")}</p>`;
     // Javobsiz savolni tarixdan olib tashlaymiz, shunda qayta yuborish mumkin

@@ -1,15 +1,9 @@
 // Javoblarni yuklab olinadigan fayllarga aylantirish: Word (.docx) va PowerPoint (.pptx)
-import PptxGenJS from "pptxgenjs";
 import {
   Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType,
 } from "docx";
 import { marked } from "marked";
 
-const NAVY = "141C2B";
-const BLUE = "1F3A8A";
-const ACCENT = "3B82F6";
-const INK = "1E293B";
-const MUTED = "64748B";
 const FONT = "Calibri";
 
 // Fayl nomi uchun xavfsiz qisqa nom
@@ -21,64 +15,7 @@ export function safeFileName(title, ext) {
 // LaTeX belgilarini oddiy matnga yaqinlashtiradi ($x^2$ → x^2)
 const plainMath = (s) => String(s).replace(/\$\$([\s\S]+?)\$\$/g, "$1").replace(/\$([^$\n]+)\$/g, "$1");
 
-// ---------------------------------------------------------------------------
-// PowerPoint
-// ---------------------------------------------------------------------------
-export function normalizeDeck(deck) {
-  const str = (v, n) => plainMath(String(v ?? "").trim()).slice(0, n);
-  const slides = (Array.isArray(deck?.slides) ? deck.slides : [])
-    .map((s) => ({
-      title: str(s?.title, 120),
-      bullets: (Array.isArray(s?.bullets) ? s.bullets : []).map((b) => str(b, 300)).filter(Boolean).slice(0, 8),
-      notes: str(s?.notes, 1500),
-    }))
-    .filter((s) => s.title || s.bullets.length)
-    .slice(0, 25);
-  return { title: str(deck?.title, 150) || "Taqdimot", subtitle: str(deck?.subtitle, 200), slides };
-}
-
-export async function buildPptx(input) {
-  const deck = normalizeDeck(input);
-  const pptx = new PptxGenJS();
-  pptx.layout = "LAYOUT_WIDE"; // 13.33 x 7.5 dyuym
-  pptx.title = deck.title;
-  pptx.author = "Gamma AI";
-  pptx.company = "Gamma-AI.uz";
-
-  // Titul slayd
-  const cover = pptx.addSlide();
-  cover.background = { color: NAVY };
-  cover.addShape(pptx.ShapeType.rect, { x: 0.8, y: 3.05, w: 1.4, h: 0.08, fill: { color: ACCENT }, line: { color: ACCENT } });
-  cover.addText(deck.title, {
-    x: 0.8, y: 1.2, w: 11.7, h: 1.8, fontFace: FONT, fontSize: 40, bold: true, color: "FFFFFF", valign: "bottom", fit: "shrink",
-  });
-  if (deck.subtitle) {
-    cover.addText(deck.subtitle, { x: 0.8, y: 3.35, w: 11.7, h: 1.2, fontFace: FONT, fontSize: 20, color: "CBD5E1", valign: "top" });
-  }
-  cover.addText("Gamma AI · Gamma-AI.uz", { x: 0.8, y: 6.6, w: 8, h: 0.4, fontFace: FONT, fontSize: 12, color: "94A3B8" });
-
-  deck.slides.forEach((s, i) => {
-    const slide = pptx.addSlide();
-    slide.background = { color: "FFFFFF" };
-    slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.18, h: 7.5, fill: { color: BLUE }, line: { color: BLUE } });
-    slide.addText(s.title, {
-      x: 0.7, y: 0.4, w: 11.9, h: 1.0, fontFace: FONT, fontSize: 30, bold: true, color: INK, valign: "middle", fit: "shrink",
-    });
-    slide.addShape(pptx.ShapeType.rect, { x: 0.7, y: 1.45, w: 1.0, h: 0.06, fill: { color: ACCENT }, line: { color: ACCENT } });
-    if (s.bullets.length) {
-      const total = s.bullets.join(" ").length;
-      const fontSize = total > 700 ? 15 : total > 450 ? 17 : s.bullets.length > 5 ? 19 : 21;
-      slide.addText(
-        s.bullets.map((b) => ({ text: b, options: { bullet: { code: "25A0" }, paraSpaceAfter: 10 } })),
-        { x: 0.7, y: 1.8, w: 11.9, h: 5.0, fontFace: FONT, fontSize, color: INK, valign: "top", fit: "shrink", lineSpacingMultiple: 1.1 },
-      );
-    }
-    slide.addText(`${i + 2}`, { x: 12.2, y: 6.9, w: 0.8, h: 0.4, fontFace: FONT, fontSize: 11, color: MUTED, align: "right" });
-    if (s.notes) slide.addNotes(s.notes);
-  });
-
-  return pptx.write({ outputType: "nodebuffer" });
-}
+export { normalizeDeck, buildPptx } from "./pptx.js";
 
 // ---------------------------------------------------------------------------
 // Word: Markdown → .docx

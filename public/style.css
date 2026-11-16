@@ -303,21 +303,40 @@ button, input, textarea { font: inherit; color: inherit; }
 .msg.user .bubble .file-chip .fmeta { color: inherit; opacity: .8; }
 .app.dragging .composer { border-color: var(--accent); border-style: dashed; }
 
-/* Javob ostidagi amallar: Word, Taqdimot, PowerPoint */
-.msg-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
-.msg-actions button {
-  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--surface-2);
-  color: var(--text); border-radius: 8px; padding: 6px 11px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+/* Tayyorlangan fayl kartochkasi (taqdimot, Word) */
+.bubble .fc-head { margin: 0 0 10px; font-weight: 700; }
+.file-card {
+  display: flex; align-items: center; gap: 14px; max-width: 460px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 12px 12px 12px;
+  box-shadow: var(--card-shadow);
 }
-.msg-actions button:hover:not(:disabled) { border-color: var(--accent); color: var(--link); }
-.msg-actions button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); box-shadow: 0 3px 0 var(--accent-shadow); }
-.msg-actions button.primary:hover:not(:disabled) { background: var(--accent-hover); color: var(--accent-text); }
-.msg-actions button:disabled { opacity: .55; cursor: progress; }
-.msg-actions .act-error { color: var(--danger); font-size: 13px; align-self: center; }
-.bubble .deck-outline ol { padding-left: 1.3em; }
-.bubble .deck-outline li { margin: .5em 0; }
-.bubble .deck-outline li > strong { display: block; }
-.bubble .deck-outline ul { margin: .25em 0; color: var(--muted); font-size: .95em; }
+.file-card .fc-icon {
+  width: 46px; height: 54px; border-radius: 8px; flex-shrink: 0; display: grid; place-items: end center; padding-bottom: 7px;
+  font-size: 10px; font-weight: 800; letter-spacing: .04em; color: #fff; position: relative;
+}
+.file-card .fc-icon::before { content: ""; position: absolute; top: 0; right: 0; border-style: solid; border-width: 0 12px 12px 0; border-color: transparent var(--surface-2) rgba(255,255,255,.35) transparent; }
+.file-card .fc-icon.pptx { background: linear-gradient(160deg, #f97316, #c2410c); }
+.file-card .fc-icon.docx { background: linear-gradient(160deg, #3b82f6, #1d4ed8); }
+.file-card .fc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.file-card .fc-info b { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-card .fc-info small { color: var(--muted); font-size: 12.5px; }
+.file-card .fc-dl {
+  border: 0; border-radius: 8px; padding: 9px 13px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; flex-shrink: 0;
+  background: var(--accent); color: var(--accent-text); box-shadow: 0 3px 0 var(--accent-shadow); white-space: nowrap;
+}
+.file-card .fc-dl:hover:not(:disabled) { background: var(--accent-hover); }
+.file-card .fc-dl:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 var(--accent-shadow); }
+.file-card .fc-dl:disabled { opacity: .7; cursor: progress; }
+.bubble .fc-error { color: var(--danger); font-size: 13px; margin: 6px 0 0; }
+.bubble .fc-error:empty { display: none; }
+.bubble .fc-details { margin-top: 12px; font-size: 14px; }
+.bubble .fc-details summary { cursor: pointer; color: var(--link); font-weight: 700; font-size: 13px; }
+.bubble .fc-details ol { margin: 8px 0 0; padding-left: 1.4em; color: var(--muted); }
+.bubble .fc-preview { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; max-height: 420px; overflow: auto; }
+@media (max-width: 520px) {
+  .file-card { flex-wrap: wrap; }
+  .file-card .fc-dl { width: 100%; }
+}
 .bubble .gen-image { margin: 0; }
 .bubble .gen-image img { display: block; max-width: min(100%, 512px); height: auto; border-radius: 8px; }
 .bubble .gen-image figcaption { margin-top: 8px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
