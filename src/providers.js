@@ -260,3 +260,124 @@ export async function imageSearchQuery(text, signal) {
   const q = line.replace(/^(query|search)\s*:\s*/i, "").replace(/^["'«»“”*\s]+|["'«»“”*.!?\s]+$/g, "").trim();
   return q ? q.slice(0, 100) : null;
 }
+
+// ---------------------------------------------------------------------------
+// Rasmni o'qish (vision): rasmdagi barcha matn va tasvirni so'z bilan ifodalaydi.
+// Natija oddiy matn sifatida suhbatga qo'shiladi, shuning uchun asosiy model rasm ko'rmasa ham ishlaydi.
+// ---------------------------------------------------------------------------
+const VISION_SYSTEM =
+  "You read images for a teaching assistant that cannot see them. First transcribe ALL visible text exactly as written, " +
+  "in its original language and script (keep line breaks; write math formulas in LaTeX). Then describe in detail " +
+  "everything else that matters for understanding: diagrams, charts (axes, values, trends), tables (as Markdown), " +
+  "drawings, photos, handwriting. If it is a task or exam question, reproduce it completely. Do not solve anything, " +
+  "do not add opinions. Write the description part in Uzbek (Latin script).";
+
+export async function describeImage(buf, mime, signal) {
+  const dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
+  if (PROVIDER === "gemini") {
+    gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const r = await gemini.models.generateContent({
+      model: process.env.VISION_MODEL || MODEL,
+      contents: [{ role: "user", parts: [{ inlineData: { mimeType: mime, data: buf.toString("base64") } }, { text: "Rasmni o'qing." }] }],
+      config: { systemInstruction: VISION_SYSTEM, abortSignal: signal },
+    });
+    return r.text;
+  }
+  if (PROVIDER === "claude") {
+    claude ??= new Anthropic();
+    const r = await claude.messages.create(
+      {
+        model: process.env.VISION_MODEL || MODEL,
+        max_tokens: 4000,
+        system: VISION_SYSTEM,
+        messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: mime, data: buf.toString("base64") } }, { type: "text", text: "Rasmni o'qing." }] }],
+      },
+      { signal },
+    );
+    return r.content.find((b) => b.type === "text")?.text;
+  }
+  groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
+  const models = [
+    ...new Set([process.env.VISION_MODEL, "meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"].filter(Boolean)),
+  ];
+  let lastErr = null;
+  for (const model of models) {
+    try {
+      const r = await groq.chat.completions.create(
+        {
+          model,
+          temperature: 0.1,
+          max_completion_tokens: 2500,
+          messages: [
+            { role: "system", content: VISION_SYSTEM },
+            { role: "user", content: [{ type: "text", text: "Rasmni o'qing." }, { type: "image_url", image_url: { url: dataUrl } }] },
+          ],
+        },
+        { signal },
+      );
+      const out = r.choices?.[0]?.message?.content;
+      if (out && out.trim()) return out;
+    } catch (err) {
+      if (signal?.aborted || err?.status === 429) throw err;
+      console.warn(`Vision modeli ${model} xatosi:`, err?.status, err?.message);
+      lastErr = err;
+    }
+  }
+  if (lastErr) throw lastErr;
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Tuzilgan (JSON) javob — masalan, taqdimot slaydlari uchun
+// ---------------------------------------------------------------------------
+function parseJsonLoose(raw) {
+  const s = String(raw || "").trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+  try {
+    return JSON.parse(s);
+  } catch {
+    const a = s.indexOf("{");
+    const b = s.lastIndexOf("}");
+    if (a !== -1 && b > a) return JSON.parse(s.slice(a, b + 1));
+    throw new Error("Model JSON qaytarmadi");
+  }
+}
+
+export async function completeJSON(system, user, { maxTokens = 4000, signal } = {}) {
+  if (PROVIDER === "gemini") {
+    gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const r = await gemini.models.generateContent({
+      model: MODEL,
+      contents: [{ role: "user", parts: [{ text: user }] }],
+      config: { systemInstruction: system, responseMimeType: "application/json", abortSignal: signal },
+    });
+    return parseJsonLoose(r.text);
+  }
+  if (PROVIDER === "claude") {
+    claude ??= new Anthropic();
+    const r = await claude.messages.create(
+      { model: MODEL, max_tokens: 16000, system, messages: [{ role: "user", content: user }] },
+      { signal },
+    );
+    return parseJsonLoose(r.content.find((b) => b.type === "text")?.text);
+  }
+  groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
+  const request = {
+    model: MODEL,
+    max_completion_tokens: maxTokens,
+    reasoning_effort: "low",
+    reasoning_format: "hidden",
+    response_format: { type: "json_object" },
+    messages: [{ role: "system", content: system }, { role: "user", content: user }],
+  };
+  let r;
+  try {
+    r = await groq.chat.completions.create(request, { signal });
+  } catch (err) {
+    // Ba'zan JSON rejimi "json_validate_failed" beradi — oddiy rejimda qayta urinamiz
+    if (err?.status !== 400 || signal?.aborted) throw err;
+    console.warn("JSON rejimi xatosi, oddiy rejimda qayta urinilmoqda:", err?.message);
+    delete request.response_format;
+    r = await groq.chat.completions.create(request, { signal });
+  }
+  return parseJsonLoose(r.choices?.[0]?.message?.content);
+}

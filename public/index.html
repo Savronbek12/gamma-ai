@@ -60,7 +60,11 @@
         </div>
       </section>
 
+      <div class="attach-bar" id="attachBar" hidden></div>
       <form class="composer" id="composer">
+        <button type="button" id="attachBtn" class="image-btn attach-btn" aria-label="Fayl biriktirish" title="Fayl biriktirish: PDF, Word, PowerPoint, Excel, matn, rasm">📎</button>
+        <input type="file" id="fileInput" hidden
+          accept=".pdf,.docx,.pptx,.xlsx,.odt,.odp,.ods,.txt,.md,.csv,.tsv,.json,.xml,.html,.htm,.rtf,.tex,.srt,.js,.ts,.py,.java,.c,.cpp,.cs,.go,.php,.sql,.yaml,.yml,.png,.jpg,.jpeg,.webp,.gif,image/*">
         <button type="button" id="imageBtn" class="image-btn" aria-pressed="false" aria-label="Rasm qidirish rejimi" title="Internetdan rasm qidirish" hidden>🖼</button>
         <textarea id="input" rows="1" placeholder="Savolingizni yozing…" aria-label="Savol" maxlength="8000"></textarea>
         <button type="submit" id="sendBtn" aria-label="Yuborish">➤</button>

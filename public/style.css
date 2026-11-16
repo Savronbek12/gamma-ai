@@ -246,6 +246,53 @@ button, input, textarea { font: inherit; color: inherit; }
 .composer .image-btn { background: var(--surface-2); color: var(--muted); box-shadow: var(--card-shadow); margin-left: -6px; }
 .composer .image-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); box-shadow: 0 3px 0 var(--accent-shadow); }
 .composer .image-btn[hidden] { display: none; }
+.composer .attach-btn + input + .image-btn { margin-left: 0; }
+.composer .attach-btn:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+
+/* Biriktirilgan fayl */
+.attach-bar { max-width: 800px; width: calc(100% - 32px); margin: 0 auto 8px; display: flex; }
+.attach-bar[hidden] { display: none; }
+.file-chip {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 8px 6px 10px; font-size: 13px; box-shadow: var(--card-shadow);
+}
+.file-chip .fname { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.file-chip .fmeta { color: var(--muted); white-space: nowrap; }
+.file-chip.error { border-color: var(--danger); }
+.file-chip.error .fmeta { color: var(--danger); white-space: normal; }
+.file-chip button {
+  border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px;
+  width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0;
+}
+.file-chip button:hover { background: var(--surface-2); color: var(--text); }
+.file-chip .spin {
+  width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid var(--accent-soft); border-top-color: var(--accent); animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.msg.user .bubble .file-chip {
+  display: flex; margin: -2px 0 8px; background: rgba(255, 255, 255, .14); border-color: rgba(255, 255, 255, .25);
+  box-shadow: none; color: inherit;
+}
+.msg.user .bubble .file-chip .fmeta { color: inherit; opacity: .8; }
+.app.dragging .composer { border-color: var(--accent); border-style: dashed; }
+
+/* Javob ostidagi amallar: Word, Taqdimot, PowerPoint */
+.msg-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.msg-actions button {
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text); border-radius: 8px; padding: 6px 11px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.msg-actions button:hover:not(:disabled) { border-color: var(--accent); color: var(--link); }
+.msg-actions button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); box-shadow: 0 3px 0 var(--accent-shadow); }
+.msg-actions button.primary:hover:not(:disabled) { background: var(--accent-hover); color: var(--accent-text); }
+.msg-actions button:disabled { opacity: .55; cursor: progress; }
+.msg-actions .act-error { color: var(--danger); font-size: 13px; align-self: center; }
+.bubble .deck-outline ol { padding-left: 1.3em; }
+.bubble .deck-outline li { margin: .5em 0; }
+.bubble .deck-outline li > strong { display: block; }
+.bubble .deck-outline ul { margin: .25em 0; color: var(--muted); font-size: .95em; }
 .bubble .gen-image { margin: 0; }
 .bubble .gen-image img { display: block; max-width: min(100%, 512px); height: auto; border-radius: 8px; }
 .bubble .gen-image figcaption { margin-top: 8px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }

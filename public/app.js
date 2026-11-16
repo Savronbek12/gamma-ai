@@ -31,10 +31,18 @@ function save() {
       return;
     } catch {
       const oldest = [...store.chats].sort((a, b) => a.updatedAt - b.updatedAt);
-      const msg = oldest.flatMap((c) => c.messages).find((m) => m.image);
-      if (!msg) return;
-      delete msg.image;
-      msg.imageLost = true;
+      const all = oldest.flatMap((c) => c.messages);
+      const msg = all.find((m) => m.image);
+      if (msg) {
+        delete msg.image;
+        msg.imageLost = true;
+        continue;
+      }
+      // Keyin — eski suhbatlardagi biriktirilgan fayllar matni (fayl nomi qoladi)
+      const withFile = all.find((m) => m.file && m.file.text && m !== chat.messages.at(-1));
+      if (!withFile) return;
+      withFile.file.text = "";
+      withFile.file.lost = true;
     }
   }
 }
@@ -47,6 +55,14 @@ function cleanMessages(list) {
     const expected = clean.length % 2 === 0 ? "user" : "assistant";
     if (m.role !== expected) continue;
     const item = { role: m.role, content: m.content };
+    if (m.role === "user" && m.file && typeof m.file.name === "string" && typeof m.file.text === "string") {
+      item.file = {
+        name: m.file.name.slice(0, 200), kind: m.file.kind === "image" ? "image" : "document",
+        text: m.file.text.slice(0, 60000), chars: Number(m.file.chars) || m.file.text.length,
+        truncated: !!m.file.truncated, ...(m.file.lost ? { lost: true } : {}),
+      };
+    }
+    if (m.role === "assistant" && m.deck && Array.isArray(m.deck.slides)) item.deck = m.deck;
     if (m.role === "assistant" && Array.isArray(m.sources)) item.sources = m.sources;
     if (m.role === "assistant" && typeof m.image === "string" && m.image.startsWith("data:image/")) item.image = m.image;
     if (m.role === "assistant" && m.imageLost) item.imageLost = true;
@@ -240,13 +256,113 @@ function addMessageEl(role, content, sources, msg) {
   }
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  if (role === "user") bubble.textContent = content;
-  else if (msg && msg.images) bubble.innerHTML = galleryHtml(msg);
+  if (role === "user") {
+    if (msg && msg.file) bubble.appendChild(fileChipEl(msg.file));
+    bubble.appendChild(document.createTextNode(content));
+  } else if (msg && msg.images) bubble.innerHTML = galleryHtml(msg);
   else if (msg && (msg.image || msg.imageLost)) bubble.innerHTML = imageMessageHtml(msg);
+  else if (msg && msg.deck) bubble.innerHTML = deckHtml(msg.deck);
   else bubble.innerHTML = content ? renderMarkdown(content) + sourcesHtml(sources) : "";
+  if (role === "assistant" && msg && !msg.images && !msg.image && !msg.imageLost) bubble.appendChild(actionsEl(msg));
   wrap.appendChild(bubble);
   chatEl.appendChild(wrap);
   return bubble;
+}
+
+// ---------- Biriktirilgan fayl belgisi ----------
+const formatChars = (n) => (n >= 1000 ? `${Math.round(n / 1000)} ming belgi` : `${n} belgi`);
+function fileChipEl(file, { status, onRemove } = {}) {
+  const chip = document.createElement("div");
+  chip.className = "file-chip" + (status === "error" ? " error" : "");
+  const icon = document.createElement(status === "uploading" ? "span" : "span");
+  if (status === "uploading") icon.className = "spin";
+  else icon.textContent = file.kind === "image" ? "🖼" : "📄";
+  const name = document.createElement("span");
+  name.className = "fname";
+  name.textContent = file.name;
+  name.title = file.name;
+  const meta = document.createElement("span");
+  meta.className = "fmeta";
+  meta.textContent =
+    status === "uploading" ? (file.kind === "image" ? "rasm o'qilmoqda…" : "o'qilmoqda…")
+    : status === "error" ? file.error
+    : file.lost ? "matni saqlanmagan"
+    : file.kind === "image" ? "rasm o'qildi"
+    : formatChars(file.chars || file.text.length) + (file.truncated ? " (qisqartirildi)" : "");
+  chip.append(icon, name, meta);
+  if (onRemove) {
+    const x = document.createElement("button");
+    x.type = "button";
+    x.textContent = "✕";
+    x.setAttribute("aria-label", "Faylni olib tashlash");
+    x.addEventListener("click", onRemove);
+    chip.appendChild(x);
+  }
+  return chip;
+}
+
+// ---------- Taqdimot ----------
+function deckHtml(deck) {
+  const slides = deck.slides
+    .map((s) => `<li><strong>${escapeHtml(s.title || "")}</strong>${s.bullets?.length ? `<ul>${s.bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}</ul>` : ""}</li>`)
+    .join("");
+  return `<p><strong>Taqdimot tayyor: «${escapeHtml(deck.title)}»</strong> — ${deck.slides.length + 1} ta slayd (titul bilan). Quyida reja; PowerPoint faylini yuklab oling.</p>
+    <div class="deck-outline"><ol>${slides}</ol></div>`;
+}
+const deckOutlineText = (deck) =>
+  `Taqdimot: «${deck.title}»${deck.subtitle ? ` — ${deck.subtitle}` : ""}\n\n` +
+  deck.slides.map((s, i) => `${i + 1}. ${s.title}\n${(s.bullets || []).map((b) => `   - ${b}`).join("\n")}`).join("\n");
+const deckMarkdown = (deck) =>
+  `${deck.subtitle ? `*${deck.subtitle}*\n\n` : ""}` +
+  deck.slides.map((s) => `## ${s.title}\n\n${(s.bullets || []).map((b) => `- ${b}`).join("\n")}`).join("\n\n");
+
+// ---------- Fayl yuklab olish (server vaqtinchalik havola beradi — Android ilovada ham ishlaydi) ----------
+async function downloadExport(endpoint, body) {
+  const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.url) throw new Error(data.error || "Faylni tayyorlab bo'lmadi.");
+  const a = document.createElement("a");
+  a.href = data.url;
+  a.download = data.filename || "";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+const exportDeck = (deck) => downloadExport("/api/export/pptx", { deck });
+const exportWord = (title, markdown) => downloadExport("/api/export/docx", { title, markdown });
+
+function actionsEl(msg) {
+  const box = document.createElement("div");
+  box.className = "msg-actions";
+  const err = document.createElement("span");
+  err.className = "act-error";
+  const button = (label, cls, run) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    if (cls) b.className = cls;
+    b.addEventListener("click", async () => {
+      err.textContent = "";
+      b.disabled = true;
+      try { await run(); } catch (e) { err.textContent = e.message || "Xatolik yuz berdi."; }
+      b.disabled = false;
+    });
+    box.appendChild(b);
+  };
+  if (msg.deck) {
+    button("⬇ PowerPoint (.pptx)", "primary", () => exportDeck(msg.deck));
+    button("⬇ Word (.docx)", "", () => exportWord(msg.deck.title, deckMarkdown(msg.deck)));
+  } else {
+    button("⬇ Word", "", () => exportWord(chat.title || "Gamma AI javobi", msg.content));
+    button("📊 Taqdimot", "", async () => {
+      if (busy) throw new Error("Avvalgi so'rov tugashini kuting.");
+      const idx = chat.messages.indexOf(msg);
+      const question = idx > 0 ? chat.messages[idx - 1].content : chat.title || "";
+      sendPresentation("Yuqoridagi javob asosida taqdimot tayyorlab bering.", { source: msg.content, topic: question });
+    });
+  }
+  box.appendChild(err);
+  return box;
 }
 function renderAll() {
   chatEl.querySelectorAll(".msg").forEach((n) => n.remove());
@@ -329,8 +445,8 @@ function updateCurrent() {
 }
 
 // Yangi savol joriy suhbatga qo'shiladi; suhbat birinchi savolda ro'yxatga yoziladi
-function pushUserMessage(c, text) {
-  c.messages.push({ role: "user", content: text });
+function pushUserMessage(c, text, file) {
+  c.messages.push(file ? { role: "user", content: text, file } : { role: "user", content: text });
   c.updatedAt = Date.now();
   let isNew = false;
   if (!isSaved(c)) {
@@ -404,7 +520,7 @@ imageBtn.addEventListener("click", () => {
 
 async function sendImage(text) {
   busy = true;
-  sendBtn.disabled = true;
+  updateSendBtn();
   inputEl.value = "";
   autosize();
 
@@ -437,7 +553,7 @@ async function sendImage(text) {
 
   busy = false;
   controller = null;
-  sendBtn.disabled = !inputEl.value.trim();
+  updateSendBtn();
   if (chat !== c) return dropUnanswered(c); // foydalanuvchi boshqa suhbatga o'tdi
 
   if (images) {
@@ -458,20 +574,223 @@ async function sendImage(text) {
   scrollDown(true);
 }
 
+// ---------- Fayl biriktirish ----------
+const attachBar = $("attachBar");
+const fileInput = $("fileInput");
+const MAX_FILE_MB = 20;
+let attachment = null; // { status: "uploading" | "ready" | "error", name, kind, text, chars, truncated, error }
+let attachController = null;
+
+function renderAttach() {
+  attachBar.innerHTML = "";
+  attachBar.hidden = !attachment;
+  if (attachment) {
+    attachBar.appendChild(fileChipEl(attachment, { status: attachment.status, onRemove: clearAttachment }));
+  }
+  updateSendBtn();
+}
+function clearAttachment() {
+  attachController?.abort();
+  attachController = null;
+  attachment = null;
+  fileInput.value = "";
+  renderAttach();
+}
+function updateSendBtn() {
+  sendBtn.disabled = busy || attachment?.status === "uploading" || !(inputEl.value.trim() || attachment?.status === "ready");
+}
+
+// Katta rasmlarni brauzerda kichraytiramiz (tezroq yuklanadi, vision modeli chegarasiga sig'adi)
+async function shrinkImage(file) {
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type) || typeof createImageBitmap !== "function") return { blob: file, name: file.name };
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+  if (scale === 1 && file.size < 1.5 * 1024 * 1024) return { blob: file, name: file.name };
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bmp.width * scale);
+  canvas.height = Math.round(bmp.height * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.85));
+  return blob ? { blob, name: file.name.replace(/\.[^.]+$/, "") + ".jpg" } : { blob: file, name: file.name };
+}
+
+async function attachFile(file) {
+  if (!file || busy) return;
+  attachController?.abort();
+  const isImage = /^image\//.test(file.type) || /\.(png|jpe?g|webp|gif)$/i.test(file.name);
+  const name = file.name || (isImage ? "rasm.png" : "fayl");
+  if (file.size > MAX_FILE_MB * 1024 * 1024) {
+    attachment = { status: "error", name, kind: isImage ? "image" : "document", error: `juda katta (${MAX_FILE_MB} MB dan oshmasin)` };
+    return renderAttach();
+  }
+  const ctrl = (attachController = new AbortController());
+  attachment = { status: "uploading", name, kind: isImage ? "image" : "document" };
+  renderAttach();
+  try {
+    const { blob, name: uploadName } = isImage ? await shrinkImage(file).catch(() => ({ blob: file, name })) : { blob: file, name };
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(uploadName || name) },
+      body: blob,
+      signal: ctrl.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || typeof data.text !== "string") throw new Error(data.error || "Faylni o'qib bo'lmadi.");
+    if (ctrl !== attachController) return;
+    attachment = {
+      status: "ready", name, kind: data.kind === "image" ? "image" : "document",
+      text: data.text, chars: Number(data.chars) || data.text.length, truncated: !!data.truncated,
+    };
+  } catch (err) {
+    if (err.name === "AbortError" || ctrl !== attachController) return;
+    attachment = { status: "error", name, kind: attachment?.kind || "document", error: err.message || "Tarmoq xatosi." };
+  }
+  attachController = null;
+  renderAttach();
+  inputEl.focus();
+}
+
+$("attachBtn").addEventListener("click", () => { if (!busy) fileInput.click(); });
+fileInput.addEventListener("change", () => attachFile(fileInput.files[0]));
+inputEl.addEventListener("paste", (e) => {
+  const file = [...(e.clipboardData?.files || [])][0];
+  if (file) {
+    e.preventDefault();
+    attachFile(file);
+  }
+});
+// Faylni sahifaga sudrab tashlash
+const appEl = document.querySelector(".app");
+let dragDepth = 0;
+appEl.addEventListener("dragenter", (e) => {
+  if (![...(e.dataTransfer?.types || [])].includes("Files")) return;
+  dragDepth++;
+  appEl.classList.add("dragging");
+});
+appEl.addEventListener("dragleave", () => {
+  if (--dragDepth <= 0) { dragDepth = 0; appEl.classList.remove("dragging"); }
+});
+appEl.addEventListener("dragover", (e) => { if ([...(e.dataTransfer?.types || [])].includes("Files")) e.preventDefault(); });
+appEl.addEventListener("drop", (e) => {
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  dragDepth = 0;
+  appEl.classList.remove("dragging");
+  attachFile(e.dataTransfer.files[0]);
+});
+
+// Biriktirilgan faylni yuborishga oladi (tayyor bo'lsa) va panelni tozalaydi
+function takeAttachment() {
+  if (attachment?.status !== "ready") return null;
+  const { name, kind, text, chars, truncated } = attachment;
+  attachment = null;
+  fileInput.value = "";
+  renderAttach();
+  return { name, kind, text, chars, truncated };
+}
+
+// Serverga faqat oxirgi biriktirilgan faylning matnini yuboramiz (model faqat shuni o'qiydi), qolganlarining nomi yetarli
+function chatPayload(messages) {
+  let lastFile = -1;
+  messages.forEach((m, i) => { if (m.file) lastFile = i; });
+  return messages.map((m, i) => ({
+    role: m.role,
+    content: m.content,
+    ...(m.file ? { file: { name: m.file.name, text: i === lastFile ? m.file.text : "" } } : {}),
+  }));
+}
+
+// ---------- So'rov turlari: taqdimot va Word fayl ----------
+const PRESENTATION_WORD = /(taqdimot|prezentats|presentation|power\s?point|pptx|slayd|slides?\b|презентац|слайд)/i;
+const CREATE_WORD = /(\bber|qil|tayyorla|yasa|tuz|yarat|kerak|chiqar|make|create|generate|prepare|build|сдела|подготов|созда|состав|нужн)/i;
+const EXPLAIN_WORD = /(tushuntir|izohla|tahlil|o['ʻ’`]?qib|o['ʻ’`]?qi\b|xulosa|mazmun|nima\s+haqida|explain|summar|analy|объясн|анализ|перескаж)/i;
+// "Fotosintez mavzusida taqdimot qilib bering" — ha; "bu taqdimotni tushuntirib bering" — yo'q (oddiy javob)
+const wantsPresentation = (text) => PRESENTATION_WORD.test(text) && CREATE_WORD.test(text) && !EXPLAIN_WORD.test(text);
+const WORD_INTENT = /(\bword\b|docx|\.doc\b|referat|hujjat\s+(qilib|tayyorla|yoz)|fayl\s*(qilib|ko['ʻ’`]?rinishida|ga)|файл|реферат|документ)/i;
+
+// Taqdimot: server slaydlar rejasini tuzadi, keyin .pptx avtomatik yuklab olinadi
+async function sendPresentation(text, { file = null, source = null, topic = null } = {}) {
+  if (busy) return;
+  busy = true;
+  updateSendBtn();
+  inputEl.value = "";
+  autosize();
+
+  const c = chat;
+  pushUserMessage(c, text, file);
+  addMessageEl("user", text, null, file ? { file } : null);
+  const bubble = addMessageEl("assistant", "");
+  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div><p class="note">Taqdimot tayyorlanmoqda — slaydlar tuzilmoqda (odatda 20–60 soniya)…</p>';
+  scrollDown(true);
+  controller = new AbortController();
+
+  let deck = null;
+  let errorText = null;
+  try {
+    const res = await fetch("/api/presentation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: topic ? `${text}\nMavzu: ${topic}`.slice(0, 7900) : text,
+        subject: c.subject,
+        ...(file ? { file: { name: file.name, text: file.text } } : {}),
+        ...(source ? { source } : {}),
+      }),
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.deck?.slides?.length) throw new Error(data.error || "Taqdimotni tuzib bo'lmadi.");
+    deck = data.deck;
+  } catch (err) {
+    if (err.name !== "AbortError") errorText = err.message || "Tarmoq xatosi.";
+  }
+
+  busy = false;
+  controller = null;
+  updateSendBtn();
+  if (chat !== c) return dropUnanswered(c);
+
+  if (deck) {
+    const msg = { role: "assistant", content: deckOutlineText(deck), deck };
+    c.messages.push(msg);
+    c.updatedAt = Date.now();
+    save();
+    const wrap = bubble.parentElement;
+    wrap.remove();
+    addMessageEl("assistant", msg.content, null, msg);
+    exportDeck(deck).catch(() => {}); // tugma ham bor — avtomatik yuklash o'xshamasa, foydalanuvchi bosadi
+  } else {
+    bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Taqdimotni tuzib bo'lmadi.")}</p>`;
+    dropUnanswered(c);
+    if (!isSaved(c)) chat = newDraft(c.subject);
+  }
+  scrollDown(true);
+}
+
 // ---------- Yuborish ----------
 async function send(text) {
   text = text.trim();
-  if (!text || busy) return;
-  if (imagesAvailable && (imageMode || wantsImage(text))) return sendImage(text);
+  if (busy || attachment?.status === "uploading") return;
+  const file = attachment?.status === "ready" ? attachment : null;
+  if (!text && !file) return;
+  if (!text) text = file.kind === "image" ? "Ushbu rasmni tushuntirib bering." : "Ushbu faylni o'qib, mazmunini tushuntirib bering.";
+  if (wantsPresentation(text)) return sendPresentation(text, { file: takeAttachment() });
+  if (!file && imagesAvailable && (imageMode || wantsImage(text))) return sendImage(text);
+  takeAttachment();
+  const wantsWord = WORD_INTENT.test(text);
   busy = true;
-  sendBtn.disabled = true;
+  updateSendBtn();
   inputEl.value = "";
   autosize();
 
   // Shu suhbatni eslab qolamiz: javob kelguncha boshqa suhbatga o'tilsa, javob u yerga tushmasin
   const c = chat;
-  pushUserMessage(c, text);
-  addMessageEl("user", text);
+  const fileData = file ? { name: file.name, kind: file.kind, text: file.text, chars: file.chars, truncated: file.truncated } : null;
+  pushUserMessage(c, text, fileData);
+  addMessageEl("user", text, null, fileData ? { file: fileData } : null);
   const bubble = addMessageEl("assistant", "");
   bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
   scrollDown(true);
@@ -486,7 +805,7 @@ async function send(text) {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: c.messages.map(({ role, content }) => ({ role, content })), subject: c.subject }),
+      body: JSON.stringify({ messages: chatPayload(c.messages), subject: c.subject }),
       signal: controller.signal,
     });
     if (!res.ok || !res.body) {
@@ -536,7 +855,7 @@ async function send(text) {
 
   busy = false;
   controller = null;
-  sendBtn.disabled = !inputEl.value.trim();
+  updateSendBtn();
   if (chat !== c) return dropUnanswered(c); // foydalanuvchi boshqa suhbatga o'tdi
 
   if (answer) {
@@ -544,9 +863,13 @@ async function send(text) {
     if (truncated) html += '<p class="note">Javob uzunlik chegarasiga yetdi. Davom ettirish uchun «Davom eting» deb yozing.</p>';
     if (errorText) html += `<p class="error">${escapeHtml(errorText)}</p>`;
     bubble.innerHTML = html;
-    c.messages.push(sources.length ? { role: "assistant", content: answer, sources } : { role: "assistant", content: answer });
+    const msg = sources.length ? { role: "assistant", content: answer, sources } : { role: "assistant", content: answer };
+    bubble.appendChild(actionsEl(msg));
+    c.messages.push(msg);
     c.updatedAt = Date.now();
     save();
+    // "Word fayl qilib bering", "referat yozing" kabi so'rovlarda .docx avtomatik yuklanadi
+    if (wantsWord && !errorText) exportWord(c.title || provisionalTitle(text), answer).catch(() => {});
   } else {
     bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Javob olinmadi.")}</p>`;
     // Javobsiz savolni tarixdan olib tashlaymiz, shunda qayta yuborish mumkin
@@ -563,7 +886,7 @@ function autosize() {
 }
 inputEl.addEventListener("input", () => {
   autosize();
-  sendBtn.disabled = busy || !inputEl.value.trim();
+  updateSendBtn();
 });
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
@@ -608,7 +931,7 @@ $("themeBtn").addEventListener("click", () => {
   updateCurrent();
   renderSuggestions();
   renderAll();
-  sendBtn.disabled = true;
+  updateSendBtn();
   inputEl.focus();
   // Avval sarlavhasi olinmay qolgan suhbatlar uchun qayta so'raymiz
   store.chats.filter((c) => c.titlePending).slice(0, 3).forEach(requestTitle);
