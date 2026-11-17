@@ -158,8 +158,32 @@ async function streamGroq({ systemParts, messages, signal, onText, maxTokens, re
   return finish === "length" ? "max_tokens" : "end";
 }
 
+// Gemini ba'zan javob bermay "osilib" qoladi — birinchi bo'lak shu vaqtda kelmasa, so'rovni to'xtatib zaxiraga o'tamiz
+const GEMINI_FIRST_CHUNK_MS = Number(process.env.GEMINI_FIRST_CHUNK_MS) || 30_000;
+
 async function streamGemini({ systemParts, messages, signal, onText, model = MODEL }) {
   gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const local = new AbortController();
+  const onAbort = () => local.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; local.abort(); }, GEMINI_FIRST_CHUNK_MS);
+  try {
+    return await readGeminiStream({ systemParts, messages, onText, model, signal: local.signal, onFirstChunk: () => clearTimeout(timer) });
+  } catch (err) {
+    if (timedOut && !signal?.aborted) {
+      const e = new Error(`Gemini ${GEMINI_FIRST_CHUNK_MS / 1000} soniyada javob bermadi`);
+      e.status = 504;
+      throw e;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+async function readGeminiStream({ systemParts, messages, signal, onText, model, onFirstChunk }) {
   const stream = await gemini.models.generateContentStream({
     model,
     contents: messages.map((m) => ({
@@ -177,6 +201,7 @@ async function streamGemini({ systemParts, messages, signal, onText, model = MOD
   let finish = null;
   let blocked = false;
   for await (const chunk of stream) {
+    onFirstChunk();
     if (chunk.promptFeedback?.blockReason) blocked = true;
     const text = chunk.text;
     if (text) onText(text);
