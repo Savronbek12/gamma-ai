@@ -80,17 +80,58 @@ let claude = null;
 
 export async function streamAnswer(args) {
   if (PROVIDER === "claude") return streamClaude(args);
-  if (PROVIDER === "gemini") return streamGemini(args);
+  if (PROVIDER === "gemini") return streamGeminiWithFallback(args);
   return streamGroq(args);
 }
 
-async function streamGroq({ systemParts, messages, signal, onText, maxTokens, reasoningEffort }) {
+// Gemini ishlamasa (model nomi topilmadi, limit, vaqtinchalik xato) foydalanuvchiga xato ko'rsatmaymiz:
+// avval Gemini'ning barqaror taxallusi, so'ng Groq (kaliti bo'lsa) bilan javob beramiz.
+// Matn allaqachon yuborila boshlagan bo'lsa qayta urinmaymiz — javob ikki marta chiqib qolmasin.
+const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-flash-latest";
+let workingGeminiModel = null;
+// fn(model) ni ishlaydigan Gemini modeli topilguncha sinaydi; hammasi ishlamasa oxirgi xatoni tashlaydi
+async function tryGeminiModels(fn, signal) {
+  const models = [...new Set([workingGeminiModel, MODEL, GEMINI_FALLBACK_MODEL].filter(Boolean))];
+  let lastErr;
+  for (const model of models) {
+    try {
+      const out = await fn(model);
+      workingGeminiModel = model;
+      return out;
+    } catch (err) {
+      if (signal?.aborted || err?.noRetry || err?.status === 401 || err?.status === 403) throw err;
+      console.warn(`Gemini (${model}) xatosi [${err?.status ?? "?"}]: ${String(err?.message).slice(0, 300)}`);
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+async function streamGeminiWithFallback(args) {
+  let sent = false;
+  const tracked = { ...args, onText: (t) => { sent = true; args.onText(t); } };
+  try {
+    return await tryGeminiModels(async (model) => {
+      try {
+        return await streamGemini({ ...tracked, model });
+      } catch (err) {
+        if (sent && err && typeof err === "object") err.noRetry = true; // matn ketgan — boshqa model bilan takrorlamaymiz
+        throw err;
+      }
+    }, args.signal);
+  } catch (err) {
+    if (sent || args.signal?.aborted || !process.env.GROQ_API_KEY) throw err;
+    console.warn("Gemini ishlamadi, Groq zaxirasi ishlatilmoqda");
+    return streamGroq({ ...tracked, model: process.env.GROQ_FALLBACK_MODEL || DEFAULT_MODELS.groq });
+  }
+}
+
+async function streamGroq({ systemParts, messages, signal, onText, maxTokens, reasoningEffort, model = MODEL }) {
   // GROQ_API_KEY muhit o'zgaruvchisidan olinadi. Qayta urinishlar kam — aks holda xato juda kech chiqadi.
   // Qayta urinishlarni server.js o'zi boshqaradi (limitda kutish, tarixni qisqartirish)
   groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
   const stream = await groq.chat.completions.create(
     {
-      model: MODEL,
+      model,
       stream: true,
       // Fikrlash + javob uchun chegara. Groq bepul tarifi bu qiymatni ham daqiqalik token limitiga qo'shib hisoblaydi.
       max_completion_tokens: maxTokens || Number(process.env.MAX_OUTPUT_TOKENS) || 3500,
@@ -117,10 +158,10 @@ async function streamGroq({ systemParts, messages, signal, onText, maxTokens, re
   return finish === "length" ? "max_tokens" : "end";
 }
 
-async function streamGemini({ systemParts, messages, signal, onText }) {
+async function streamGemini({ systemParts, messages, signal, onText, model = MODEL }) {
   gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const stream = await gemini.models.generateContentStream({
-    model: MODEL,
+    model,
     contents: messages.map((m) => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content }],
@@ -226,12 +267,12 @@ async function shortAnswer(system, text, signal) {
   }
   if (PROVIDER === "gemini") {
     gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    const r = await gemini.models.generateContent({
-      model: process.env.TITLE_MODEL || MODEL,
+    const ask = async (model) => (await gemini.models.generateContent({
+      model,
       contents: [{ role: "user", parts: [{ text: input }] }],
       config: { systemInstruction: system, abortSignal: signal },
-    });
-    return r.text;
+    })).text;
+    return process.env.TITLE_MODEL ? ask(process.env.TITLE_MODEL) : tryGeminiModels(ask, signal);
   }
   claude ??= new Anthropic();
   const r = await claude.messages.create(
@@ -425,12 +466,17 @@ function parseJsonLoose(raw) {
 export async function completeJSON(system, user, { maxTokens = 4000, signal } = {}) {
   if (PROVIDER === "gemini") {
     gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    const r = await gemini.models.generateContent({
-      model: MODEL,
-      contents: [{ role: "user", parts: [{ text: user }] }],
-      config: { systemInstruction: system, responseMimeType: "application/json", abortSignal: signal },
-    });
-    return parseJsonLoose(r.text);
+    try {
+      return await tryGeminiModels(async (model) => parseJsonLoose((await gemini.models.generateContent({
+        model,
+        contents: [{ role: "user", parts: [{ text: user }] }],
+        config: { systemInstruction: system, responseMimeType: "application/json", abortSignal: signal },
+      })).text), signal);
+    } catch (err) {
+      if (signal?.aborted || !process.env.GROQ_API_KEY) throw err;
+      console.warn("Gemini JSON ishlamadi, Groq zaxirasi ishlatilmoqda");
+      return groqJSON(system, user, { maxTokens, signal, model: process.env.GROQ_FALLBACK_MODEL || DEFAULT_MODELS.groq });
+    }
   }
   if (PROVIDER === "claude") {
     claude ??= new Anthropic();
@@ -440,9 +486,13 @@ export async function completeJSON(system, user, { maxTokens = 4000, signal } = 
     );
     return parseJsonLoose(r.content.find((b) => b.type === "text")?.text);
   }
+  return groqJSON(system, user, { maxTokens, signal, model: MODEL });
+}
+
+async function groqJSON(system, user, { maxTokens, signal, model }) {
   groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
   const request = {
-    model: MODEL,
+    model,
     max_completion_tokens: maxTokens,
     reasoning_effort: "low",
     reasoning_format: "hidden",
