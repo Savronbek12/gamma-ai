@@ -12,10 +12,10 @@ services:
       - key: NODE_VERSION
         value: "22"
       - key: AI_PROVIDER
-        value: groq
-      - key: GROQ_API_KEY
-        sync: false   # Render panelida qo'lda kiritiladi (maxfiy)
+        value: gemini
       - key: GEMINI_API_KEY
-        sync: false   # faqat AI_PROVIDER=gemini bo'lsa kerak
+        sync: false   # Render panelida qo'lda kiritiladi (maxfiy) — asosiy AI
+      - key: GROQ_API_KEY
+        sync: false   # audio/video nutqini matnga aylantirish uchun (Whisper)
       - key: RATE_LIMIT_PER_MINUTE
         value: "15"
