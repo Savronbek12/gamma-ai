@@ -222,30 +222,32 @@ button, input, textarea { font: inherit; color: inherit; }
 .typing span:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
 
+/* Yozish maydoni (Gemini uslubida): yuqorida biriktirilgan fayl, o'rtada matn, pastda "+" va yuborish */
 .composer {
-  display: flex; gap: 8px; align-items: flex-end;
+  display: flex; flex-direction: column; gap: 4px;
   max-width: 800px; width: calc(100% - 32px); margin: 0 auto;
-  background: var(--surface); border: 2px solid transparent; border-radius: 10px;
-  padding: 8px 8px 8px 14px; box-shadow: var(--card-shadow);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 26px;
+  padding: 12px 12px 8px 20px; box-shadow: var(--card-shadow);
 }
 .composer:focus-within { border-color: var(--accent); }
 .composer textarea {
-  flex: 1; border: 0; outline: 0; background: transparent; resize: none;
-  max-height: 200px; padding: 7px 0; line-height: 1.5;
+  width: 100%; border: 0; outline: 0; background: transparent; resize: none;
+  max-height: 200px; padding: 6px 0 4px; line-height: 1.5;
 }
 .composer textarea::placeholder { color: var(--muted); }
-.composer button {
-  width: 40px; height: 38px; border: 0; border-radius: 8px; cursor: pointer;
-  background: var(--accent); color: var(--accent-text); font-size: 16px; flex-shrink: 0;
-  box-shadow: 0 3px 0 var(--accent-shadow); margin-bottom: 3px;
-  transition: background .12s, transform .06s, box-shadow .06s;
+.composer-tools { display: flex; align-items: center; gap: 6px; }
+.tools-spacer { flex: 1; }
+.composer button { cursor: pointer; font: inherit; }
+.composer #sendBtn {
+  width: 40px; height: 40px; border: 0; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
+  background: var(--accent); color: var(--accent-text); transition: background .12s, transform .08s, opacity .12s;
 }
-.composer button:hover:not(:disabled) { background: var(--accent-hover); }
-.composer button:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 var(--accent-shadow); }
-.composer button:disabled { opacity: .45; cursor: not-allowed; }
+.composer #sendBtn:hover:not(:disabled) { background: var(--accent-hover); }
+.composer #sendBtn:active:not(:disabled) { transform: scale(.94); }
+.composer #sendBtn:disabled { opacity: .35; cursor: not-allowed; }
 /* "+" tugmasi: rasm, video, audio, fayl — faqat "+" belgisi */
 .composer { position: relative; }
-.plus-wrap { position: relative; margin-left: -8px; flex-shrink: 0; }
+.plus-wrap { position: relative; margin-left: -10px; flex-shrink: 0; }
 .composer .plus-btn {
   display: grid; place-items: center; width: 36px; height: 38px; border-radius: 8px;
   background: transparent; color: var(--muted); box-shadow: none; border: 0;
@@ -274,33 +276,57 @@ button, input, textarea { font: inherit; color: inherit; }
 .plus-menu b { display: block; font-size: 14px; font-weight: 700; }
 .plus-menu small { display: block; font-size: 12px; color: var(--muted); }
 
-/* Biriktirilgan fayl */
-.attach-bar { max-width: 800px; width: calc(100% - 32px); margin: 0 auto 8px; display: flex; }
+/* Biriktirilgan fayl: rasm/video kichik nusxasi yoki fayl plitkasi */
+.attach-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 2px 0 6px; }
 .attach-bar[hidden] { display: none; }
+.att-tile { position: relative; flex-shrink: 0; background: var(--surface-2); border: 1px solid var(--border); }
+.att-tile.media { width: 76px; height: 76px; border-radius: 16px; overflow: hidden; }
+.att-tile.media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.att-tile.doc { display: flex; align-items: center; gap: 10px; max-width: 280px; padding: 9px 34px 9px 11px; border-radius: 14px; }
+.att-tile .att-ico { font-size: 22px; flex-shrink: 0; }
+.att-tile .att-text { min-width: 0; display: flex; flex-direction: column; }
+.att-tile .att-text b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.att-tile .att-text small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.att-tile .att-spin { position: absolute; inset: 0; background: rgba(0, 0, 0, .38); display: grid; place-items: center; border-radius: inherit; }
+.att-tile.doc .att-spin { background: transparent; inset: auto 10px auto auto; top: 50%; transform: translateY(-50%); }
+.att-tile .att-spin::after {
+  content: ""; width: 26px; height: 26px; border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, .35); border-top-color: #fff; animation: spin .8s linear infinite;
+}
+.att-tile.doc .att-spin::after { width: 16px; height: 16px; border-width: 2px; border-color: var(--accent-soft); border-top-color: var(--accent); }
+.att-tile.doc.uploading .att-x { display: none; }
+.att-tile .att-err {
+  position: absolute; inset: 0; display: grid; place-items: center; border-radius: inherit;
+  background: rgba(250, 107, 92, .5); color: #fff; font-size: 26px; font-weight: 800;
+}
+.att-tile.doc .att-err { inset: auto 34px auto auto; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; border-radius: 50%; font-size: 13px; background: var(--danger); }
+.att-tile.error { border-color: var(--danger); }
+.att-tile .att-badge { position: absolute; left: 6px; bottom: 6px; font-size: 11px; color: #fff; background: rgba(0, 0, 0, .55); border-radius: 6px; padding: 1px 6px; }
+.att-tile .att-x {
+  position: absolute; top: 5px; right: 5px; width: 22px; height: 22px; border-radius: 50%; border: 0;
+  background: rgba(0, 0, 0, .62); color: #fff; font-size: 11px; display: grid; place-items: center; z-index: 1;
+}
+.att-tile.doc .att-x { top: 50%; transform: translateY(-50%); right: 8px; background: transparent; color: var(--muted); }
+.att-tile .att-x:hover { background: rgba(0, 0, 0, .8); color: #fff; }
+.att-error { flex-basis: 100%; margin: 0; color: var(--danger); font-size: 12.5px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* Xabardagi fayl belgisi (eski xabarlar) va rasm/video kichik nusxasi */
 .file-chip {
   display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-  padding: 6px 8px 6px 10px; font-size: 13px; box-shadow: var(--card-shadow);
+  padding: 6px 10px; font-size: 13px;
 }
 .file-chip .fname { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .file-chip .fmeta { color: var(--muted); white-space: nowrap; }
-.file-chip.error { border-color: var(--danger); }
-.file-chip.error .fmeta { color: var(--danger); white-space: normal; }
-.file-chip button {
-  border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px;
-  width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0;
-}
-.file-chip button:hover { background: var(--surface-2); color: var(--text); }
-.file-chip .spin {
-  width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
-  border: 2px solid var(--accent-soft); border-top-color: var(--accent); animation: spin .8s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
 .msg.user .bubble .file-chip {
-  display: flex; margin: -2px 0 8px; background: rgba(255, 255, 255, .14); border-color: rgba(255, 255, 255, .25);
-  box-shadow: none; color: inherit;
+  display: flex; margin: -2px 0 8px; background: rgba(255, 255, 255, .14); border-color: rgba(255, 255, 255, .25); color: inherit;
 }
 .msg.user .bubble .file-chip .fmeta { color: inherit; opacity: .8; }
+.msg.user .bubble .msg-thumb { position: relative; margin: -4px -8px 8px; }
+.msg.user .bubble .msg-thumb img { display: block; max-width: min(240px, 100%); max-height: 240px; border-radius: 10px; }
+.msg.user .bubble .msg-thumb.is-video::after {
+  content: "▶"; position: absolute; left: 8px; bottom: 8px; font-size: 12px; color: #fff; background: rgba(0, 0, 0, .55); border-radius: 6px; padding: 1px 7px;
+}
 .app.dragging .composer { border-color: var(--accent); border-style: dashed; }
 
 /* Tayyorlangan fayl kartochkasi (taqdimot, Word) */
@@ -377,3 +403,56 @@ button, input, textarea { font: inherit; color: inherit; }
   .welcome h1 { font-size: 26px; }
   .msg.user .bubble { max-width: 92%; }
 }
+
+/* ---------- Javob ostidagi amallar: 👍 👎 ↻ ⧉ ⋯ ---------- */
+.msg.assistant { flex-wrap: wrap; }
+.msg-actbar { flex-basis: 100%; display: flex; align-items: center; gap: 2px; padding-left: 40px; margin-top: 4px; }
+.act-btn {
+  width: 34px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); cursor: pointer; transition: background .12s, color .12s;
+}
+.act-btn:hover { background: var(--surface-2); color: var(--text); }
+.act-btn.on { color: var(--accent); }
+.act-btn.on svg { fill: currentColor; fill-opacity: .25; }
+.msg:not(:last-child) .act-regen { display: none; }
+.act-more-wrap { position: relative; }
+.act-menu {
+  position: absolute; left: 0; top: calc(100% + 4px); z-index: 20; min-width: 210px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 5px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .3); display: flex; flex-direction: column;
+}
+.act-menu[hidden] { display: none; }
+.act-menu button {
+  border: 0; background: transparent; color: var(--text); text-align: left; font: inherit; font-size: 14px;
+  padding: 8px 10px; border-radius: 7px; cursor: pointer;
+}
+.act-menu button:hover { background: var(--surface-2); }
+
+/* ---------- Topilgan rasmni yuklab olish tugmasi ---------- */
+.bubble .found-image { position: relative; }
+.bubble .found-image .dl-btn {
+  position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(0, 0, 0, .6); color: #fff; opacity: .85; transition: opacity .12s, background .12s; aspect-ratio: auto;
+}
+.bubble .found-image .dl-btn:hover { opacity: 1; background: var(--accent); }
+
+/* ---------- Topilgan videolar ---------- */
+.bubble .vgallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.bubble .found-video { margin: 0; background: var(--surface-2); border-radius: 10px; overflow: hidden; box-shadow: var(--card-shadow); display: flex; flex-direction: column; }
+.bubble .found-video .vplay {
+  position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; padding: 0; cursor: pointer;
+  background: #000;
+}
+.bubble .found-video .vplay img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: .9; }
+.bubble .found-video .vplay-ico {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 54px; height: 54px; border-radius: 50%;
+  display: grid; place-items: center; background: rgba(0, 0, 0, .6); color: #fff; transition: background .12s, transform .12s;
+}
+.bubble .found-video .vplay:hover .vplay-ico { background: var(--accent); transform: translate(-50%, -50%) scale(1.06); }
+.bubble .found-video video { width: 100%; aspect-ratio: 16 / 9; background: #000; display: block; }
+.bubble .found-video figcaption { padding: 9px 11px 11px; font-size: 12.5px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.bubble .found-video figcaption strong { color: var(--text); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bubble .found-video .vlinks { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 4px; }
+.bubble .found-video .vlinks a { display: inline-flex; align-items: center; gap: 5px; color: var(--link); font-weight: 700; text-decoration: none; }
+.bubble .found-video .vlinks a:hover { text-decoration: underline; }
+@media (max-width: 520px) { .msg-actbar { padding-left: 0; } .composer { border-radius: 22px; } }

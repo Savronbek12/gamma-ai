@@ -60,6 +60,7 @@ function cleanMessages(list) {
         name: m.file.name.slice(0, 200), kind: ["image", "video", "audio"].includes(m.file.kind) ? m.file.kind : "document",
         text: m.file.text.slice(0, 60000), chars: Number(m.file.chars) || m.file.text.length,
         truncated: !!m.file.truncated, ...(m.file.lost ? { lost: true } : {}),
+        ...(typeof m.file.thumb === "string" && m.file.thumb.startsWith("data:image/") && m.file.thumb.length < 80000 ? { thumb: m.file.thumb } : {}),
       };
     }
     if (m.role === "assistant" && m.deck && Array.isArray(m.deck.slides)) item.deck = m.deck;
@@ -68,6 +69,11 @@ function cleanMessages(list) {
     if (m.role === "assistant" && typeof m.image === "string" && m.image.startsWith("data:image/")) item.image = m.image;
     if (m.role === "assistant" && m.imageLost) item.imageLost = true;
     if (m.role === "assistant" && typeof m.imageSource === "string") item.imageSource = m.imageSource;
+    if (m.role === "assistant" && (m.rating === "up" || m.rating === "down")) item.rating = m.rating;
+    if (m.role === "assistant" && Array.isArray(m.videos)) {
+      const videos = cleanVideos(m.videos);
+      if (videos.length) item.videos = videos;
+    }
     if (m.role === "assistant" && Array.isArray(m.images)) {
       const images = cleanImages(m.images);
       if (images.length) item.images = images;
@@ -209,31 +215,86 @@ const isHttpsUrl = (u) => {
   try { return new URL(String(u)).protocol === "https:"; } catch { return false; }
 };
 const str = (v, max) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
+const isMediaLink = (u) => typeof u === "string" && u.startsWith("/api/media?");
 function cleanImages(list) {
   return (Array.isArray(list) ? list : [])
     .filter((x) => x && isHttpsUrl(x.thumb) && isHttpsUrl(x.page))
-    .slice(0, 8)
+    .slice(0, 9)
     .map((x) => ({
       thumb: x.thumb, page: x.page,
       title: str(x.title, 140) || "Rasm", creator: str(x.creator, 80),
       license: str(x.license, 40), source: str(x.source, 40),
+      ...(isMediaLink(x.download) ? { download: x.download } : {}),
     }));
 }
+function cleanVideos(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter((x) => x && isHttpsUrl(x.src) && isHttpsUrl(x.page))
+    .slice(0, 8)
+    .map((x) => ({
+      src: x.src, page: x.page, thumb: isHttpsUrl(x.thumb) ? x.thumb : null,
+      title: str(x.title, 140) || "Video", creator: str(x.creator, 80),
+      license: str(x.license, 40), source: str(x.source, 40),
+      duration: Number(x.duration) || null, size: Number(x.size) || null,
+      ...(isMediaLink(x.download) ? { download: x.download } : {}),
+    }));
+}
+const DL_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 function galleryHtml(m) {
   const items = m.images
     .map((x) => {
       const meta = [x.creator, x.license].filter(Boolean).map(escapeHtml).join(" · ");
+      const dl = x.download
+        ? `<a class="dl-btn" href="${escapeHtml(x.download)}" download title="Yuklab olish" aria-label="Yuklab olish">${DL_ICON}</a>`
+        : "";
       return `<figure class="found-image">
         <a href="${escapeHtml(x.page)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(x.title)}">
           <img src="${escapeHtml(x.thumb)}" alt="${escapeHtml(x.title)}" loading="lazy" referrerpolicy="no-referrer"
                onerror="this.closest('figure').remove()">
-        </a>
+        </a>${dl}
         <figcaption><strong>${escapeHtml(x.title)}</strong>${meta ? `<span>${meta}</span>` : ""}<span class="src">${escapeHtml(x.source || "")}</span></figcaption>
       </figure>`;
     })
     .join("");
-  return `<p class="gallery-head">Ochiq internetdan topilgan rasmlar — ustiga bosib, asl manbani oching:</p><div class="gallery">${items}</div>`;
+  return `<p class="gallery-head">Ochiq internetdan topilgan rasmlar — ustiga bosib asl manbani oching, ⬇ tugmasi bilan yuklab oling:</p><div class="gallery">${items}</div>`;
 }
+const fmtSize = (b) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b >= 1e6 ? `${Math.round(b / 1e6)} MB` : b ? `${Math.max(1, Math.round(b / 1e3))} KB` : "");
+function videoGalleryHtml(m) {
+  const items = m.videos
+    .map((v, i) => {
+      const meta = [v.duration ? fmtTime(v.duration) : "", fmtSize(v.size), v.license].filter(Boolean).map(escapeHtml).join(" · ");
+      return `<figure class="found-video">
+        <button type="button" class="vplay" data-video="${i}" aria-label="Videoni ko'rish: ${escapeHtml(v.title)}">
+          ${v.thumb ? `<img src="${escapeHtml(v.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}
+          <span class="vplay-ico"><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg></span>
+        </button>
+        <figcaption>
+          <strong title="${escapeHtml(v.title)}">${escapeHtml(v.title)}</strong>
+          <span>${escapeHtml(v.source || "")}${meta ? ` · ${meta}` : ""}</span>
+          <span class="vlinks">${v.download ? `<a href="${escapeHtml(v.download)}" download>${DL_ICON} Yuklab olish</a>` : ""}<a href="${escapeHtml(v.page)}" target="_blank" rel="noopener noreferrer">Manba</a></span>
+        </figcaption>
+      </figure>`;
+    })
+    .join("");
+  return `<p class="gallery-head">Ochiq internetdan topilgan videolar — ko'rish uchun bosing yoki yuklab oling:</p><div class="vgallery">${items}</div>`;
+}
+// Video muqovasi bosilganda o'sha joyda pleyer ochiladi
+chatEl.addEventListener("click", (e) => {
+  const btn = e.target.closest(".vplay");
+  if (!btn) return;
+  const wrap = btn.closest(".msg");
+  const msg = wrap && msgOf.get(wrap);
+  const v = msg?.videos?.[Number(btn.dataset.video)];
+  if (!v) return;
+  const video = document.createElement("video");
+  video.controls = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.preload = "metadata";
+  if (v.thumb) video.poster = v.thumb;
+  video.src = v.src;
+  btn.replaceWith(video);
+});
 
 // ---------- Avval yaratilgan rasmlar (eski suhbatlar uchun) ----------
 function imageHtml(src, prompt, source) {
@@ -246,6 +307,7 @@ function imageMessageHtml(m) {
 }
 
 // ---------- Xabarlarni chizish ----------
+const msgOf = new WeakMap();
 function addMessageEl(role, content, sources, msg) {
   welcomeEl.hidden = true;
   const wrap = document.createElement("div");
@@ -259,16 +321,31 @@ function addMessageEl(role, content, sources, msg) {
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   if (role === "user") {
-    if (msg && msg.file) bubble.appendChild(fileChipEl(msg.file));
+    if (msg && msg.file) bubble.appendChild(msg.file.thumb ? userThumbEl(msg.file) : fileChipEl(msg.file));
     bubble.appendChild(document.createTextNode(content));
   } else if (msg && msg.images) bubble.innerHTML = galleryHtml(msg);
+  else if (msg && msg.videos) bubble.innerHTML = videoGalleryHtml(msg);
   else if (msg && (msg.image || msg.imageLost)) bubble.innerHTML = imageMessageHtml(msg);
   else if (msg && msg.deck) renderDeckMessage(bubble, msg);
   else if (msg && msg.doc) renderDocMessage(bubble, msg);
   else bubble.innerHTML = content ? renderMarkdown(content) + sourcesHtml(sources) : "";
   wrap.appendChild(bubble);
+  if (msg) msgOf.set(wrap, msg);
+  if (role === "assistant" && msg) wrap.appendChild(actionBarEl(msg));
   chatEl.appendChild(wrap);
   return bubble;
+}
+
+// Foydalanuvchi yuborgan rasm/video kichik nusxasi
+function userThumbEl(file) {
+  const box = document.createElement("div");
+  box.className = "msg-thumb" + (file.kind === "video" ? " is-video" : "");
+  const img = document.createElement("img");
+  img.src = file.thumb;
+  img.alt = file.name;
+  img.title = file.name;
+  box.appendChild(img);
+  return box;
 }
 
 // ---------- Biriktirilgan fayl belgisi ----------
@@ -543,28 +620,41 @@ function renderSuggestions() {
   }
 }
 
-// ---------- Rasm qidirish rejimi (ochiq internetdan) ----------
+// ---------- Internetdan rasm/video qidirish rejimi ----------
 const searchItem = $("searchItem");
+const videoSearchItem = $("videoSearchItem");
 let imagesAvailable = false;
-let imageMode = false;
+let videosAvailable = false;
+let searchMode = null; // null | "image" | "video"
 
-// "Amir Temurning rasmini topib bering", "mushuk rasmini chiz", "найди фото…", "show me a picture of…" kabi so'rovlar
+// "Amir Temurning rasmini topib bering", "найди фото…", "show me a picture of…" kabi so'rovlar
 const IMAGE_INTENT = [
   /\b(rasm|surat|tasvir|foto|fotosurat|illyustratsiya)(i|ni|ini|si|sini|lar|lari|larini|larni)?\s+(\p{L}+\s+)?(top|ko['ʻ’`]?rsat|chiz|yarat|izla|qidir|yubor|chiqar|ber)/iu,
   /(нарисуй|(найди|покажи|сгенерируй|создай|сделай)\S*\s+(\S+\s+)?(картинк|фото|изображени|рисун))/i,
   /\b(draw|paint|(find|show|get|generate|create|make)\s+(me\s+)?(an?\s+|some\s+)?(image|picture|photo|illustration|drawing)s?)\b/i,
 ];
+// "Fotosintez haqida video topib bering", "найди видео…", "find a video about…"
+const VIDEO_INTENT = [
+  /\b(video|videolavha|videorolik|rolik|lavha)(si|ni|sini|lar|lari|larini|larni)?\s+(\p{L}+\s+)?(top|ko['ʻ’`]?rsat|izla|qidir|yubor|chiqar|ber)/iu,
+  /((найди|покажи|подбери)\S*\s+(\S+\s+)?(видео|ролик))/i,
+  /\b(find|show|get|search)\s+(me\s+)?(an?\s+|some\s+)?(video|clip)s?\b/i,
+];
 const wantsImage = (text) => IMAGE_INTENT.some((re) => re.test(text));
+const wantsVideo = (text) => VIDEO_INTENT.some((re) => re.test(text));
 
-function setImageMode(on) {
-  imageMode = on && imagesAvailable;
-  searchItem.classList.toggle("on", imageMode);
-  searchItem.setAttribute("aria-checked", String(imageMode));
-  $("plusBtn").classList.toggle("active", imageMode);
-  inputEl.placeholder = imageMode ? "Qanday rasm kerak? (masalan: Registon maydoni, Samarqand)" : "Savolingizni yozing…";
+const SEARCH_PLACEHOLDER = {
+  image: "Qanday rasm kerak? (masalan: Registon maydoni, Samarqand)",
+  video: "Qanday video kerak? (masalan: fotosintez jarayoni)",
+};
+function setSearchMode(mode) {
+  searchMode = (mode === "image" && imagesAvailable) || (mode === "video" && videosAvailable) ? mode : null;
+  searchItem.classList.toggle("on", searchMode === "image");
+  videoSearchItem.classList.toggle("on", searchMode === "video");
+  $("plusBtn").classList.toggle("active", !!searchMode);
+  inputEl.placeholder = SEARCH_PLACEHOLDER[searchMode] || "Savolingizni yozing…";
 }
 
-// ---------- "+" menyusi: rasm, video, audio, fayl, internetdan rasm qidirish ----------
+// ---------- "+" menyusi: rasm, video, audio, fayl, internetdan qidirish ----------
 const plusBtn = $("plusBtn");
 const plusMenu = $("plusMenu");
 const PICK_ACCEPT = {
@@ -589,17 +679,19 @@ plusMenu.addEventListener("click", (e) => {
   if (!item) return;
   toggleMenu(false);
   const pick = item.dataset.pick;
-  if (pick === "search") {
-    setImageMode(!imageMode);
+  if (pick === "search" || pick === "video-search") {
+    const mode = pick === "search" ? "image" : "video";
+    setSearchMode(searchMode === mode ? null : mode);
     inputEl.focus();
     return;
   }
-  if (imageMode) setImageMode(false);
+  if (searchMode) setSearchMode(null);
   fileInput.accept = PICK_ACCEPT[pick] || "";
   fileInput.click();
 });
 document.addEventListener("click", (e) => {
   if (!plusMenu.hidden && !e.target.closest(".plus-wrap")) toggleMenu(false);
+  if (!e.target.closest(".act-more-wrap")) document.querySelectorAll(".act-menu:not([hidden])").forEach((m) => (m.hidden = true));
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !plusMenu.hidden) {
@@ -608,7 +700,8 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-async function sendImage(text) {
+// Internetdan rasm yoki video qidirish
+async function sendMediaSearch(text, kind) {
   busy = true;
   updateSendBtn();
   inputEl.value = "";
@@ -618,26 +711,26 @@ async function sendImage(text) {
   pushUserMessage(c, text);
   addMessageEl("user", text);
   const bubble = addMessageEl("assistant", "");
-  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div><p class="note">Ochiq manbalardan rasm qidirilmoqda…</p>';
+  bubble.innerHTML = `<div class="typing"><span></span><span></span><span></span></div><p class="note">Ochiq internetdan ${kind === "video" ? "video" : "rasm"} qidirilmoqda…</p>`;
   scrollDown(true);
   controller = new AbortController();
 
-  let images = null;
+  let items = null;
   let query = "";
   let errorText = null;
   try {
-    const res = await fetch("/api/image-search", {
+    const res = await fetch(kind === "video" ? "/api/video-search" : "/api/image-search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: text }),
       signal: controller.signal,
     });
     const data = await res.json().catch(() => ({}));
-    images = cleanImages(data.images);
-    if (!res.ok || !images.length) throw new Error(data.error || "Rasm topilmadi.");
+    items = kind === "video" ? cleanVideos(data.videos) : cleanImages(data.images);
+    if (!res.ok || !items.length) throw new Error(data.error || (kind === "video" ? "Video topilmadi." : "Rasm topilmadi."));
     query = typeof data.query === "string" ? data.query : "";
   } catch (err) {
-    images = null;
+    items = null;
     if (err.name !== "AbortError") errorText = err.message || "Tarmoq xatosi.";
   }
 
@@ -646,22 +739,187 @@ async function sendImage(text) {
   updateSendBtn();
   if (chat !== c) return dropUnanswered(c); // foydalanuvchi boshqa suhbatga o'tdi
 
-  if (images) {
+  if (items) {
+    const what = kind === "video" ? "video" : "rasm";
     const msg = {
       role: "assistant",
-      content: `Foydalanuvchi so'roviga ko'ra ochiq internetdan ${images.length} ta rasm topildi: «${text}»${query ? ` (qidiruv: ${query})` : ""}.`,
-      images,
+      content: `Foydalanuvchi so'roviga ko'ra ochiq internetdan ${items.length} ta ${what} topildi: «${text}»${query ? ` (qidiruv: ${query})` : ""}.`,
+      ...(kind === "video" ? { videos: items } : { images: items }),
     };
-    bubble.innerHTML = galleryHtml(msg);
+    bubble.innerHTML = kind === "video" ? videoGalleryHtml(msg) : galleryHtml(msg);
     c.messages.push(msg);
     c.updatedAt = Date.now();
     save();
+    finishAssistant(bubble, msg);
   } else {
-    bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Rasm topilmadi.")}</p>`;
+    bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Hech narsa topilmadi.")}</p>`;
     dropUnanswered(c);
     if (!isSaved(c)) chat = newDraft(c.subject);
   }
   scrollDown(true);
+}
+
+// ---------- Javob ostidagi amallar: 👍 👎 ↻ ⧉ ⋯ ----------
+const ICONS = {
+  up: '<path d="M7 11v9H4v-9h3zm0 0l4-7c1.2 0 2 .9 2 2v3h5.2c1.1 0 1.9 1 1.7 2.1l-1.3 6.4c-.2.9-1 1.5-1.9 1.5H7" />',
+  down: '<path d="M17 13V4h3v9h-3zm0 0l-4 7c-1.2 0-2-.9-2-2v-3H5.8c-1.1 0-1.9-1-1.7-2.1l1.3-6.4c.2-.9 1-1.5 1.9-1.5H17" />',
+  regen: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" />',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5" />',
+  more: '<circle cx="5" cy="12" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="19" cy="12" r="1.3" />',
+};
+const svg = (name) =>
+  `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+
+// Javob matni (nusxa olish, ovoz chiqarib o'qish uchun)
+function plainTextOf(msg) {
+  if (msg.deck) return deckOutlineText(msg.deck);
+  if (msg.images) return msg.images.map((x) => `${x.title} — ${x.page}`).join("\n");
+  if (msg.videos) return msg.videos.map((x) => `${x.title} — ${x.page}`).join("\n");
+  return msg.content;
+}
+function speakableText(msg) {
+  const div = document.createElement("div");
+  div.innerHTML = msg.deck || msg.images || msg.videos ? escapeHtml(plainTextOf(msg)) : renderMarkdown(msg.content);
+  div.querySelectorAll(".katex-mathml, pre").forEach((n) => n.remove());
+  return div.textContent.replace(/\s+/g, " ").trim();
+}
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  }
+}
+
+let speakingMsg = null;
+function toggleSpeak(msg, btn) {
+  if (!("speechSynthesis" in window)) return;
+  const synth = window.speechSynthesis;
+  const wasThis = speakingMsg === msg;
+  synth.cancel();
+  document.querySelectorAll(".act-menu [data-act='speak']").forEach((b) => (b.textContent = "🔊 Ovoz chiqarib o'qish"));
+  speakingMsg = null;
+  if (wasThis) return;
+  const u = new SpeechSynthesisUtterance(speakableText(msg).slice(0, 6000));
+  const voices = synth.getVoices();
+  const voice = voices.find((v) => /^uz/i.test(v.lang)) || voices.find((v) => /^tr/i.test(v.lang)) || null;
+  if (voice) u.voice = voice;
+  u.lang = voice?.lang || "uz-UZ";
+  u.onend = u.onerror = () => {
+    if (speakingMsg === msg) speakingMsg = null;
+    btn.textContent = "🔊 Ovoz chiqarib o'qish";
+  };
+  speakingMsg = msg;
+  btn.textContent = "⏹ To'xtatish";
+  synth.speak(u);
+}
+
+function actionBarEl(msg) {
+  const bar = document.createElement("div");
+  bar.className = "msg-actbar";
+  const btn = (name, label, cls = "") => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `act-btn ${cls}`.trim();
+    b.innerHTML = svg(name);
+    b.title = label;
+    b.setAttribute("aria-label", label);
+    bar.appendChild(b);
+    return b;
+  };
+  const up = btn("up", "Yaxshi javob");
+  const down = btn("down", "Yomon javob");
+  const paintRating = () => {
+    up.classList.toggle("on", msg.rating === "up");
+    down.classList.toggle("on", msg.rating === "down");
+    up.setAttribute("aria-pressed", String(msg.rating === "up"));
+    down.setAttribute("aria-pressed", String(msg.rating === "down"));
+  };
+  paintRating();
+  const rate = (r) => {
+    msg.rating = msg.rating === r ? undefined : r;
+    if (!msg.rating) delete msg.rating;
+    paintRating();
+    save();
+  };
+  up.addEventListener("click", () => rate("up"));
+  down.addEventListener("click", () => rate("down"));
+
+  const regen = btn("regen", "Qayta javob olish", "act-regen");
+  regen.addEventListener("click", () => regenerate(msg));
+
+  const copy = btn("copy", "Nusxa olish");
+  copy.addEventListener("click", async () => {
+    if (await copyText(plainTextOf(msg))) {
+      copy.innerHTML = svg("check");
+      copy.title = "Nusxa olindi";
+      setTimeout(() => { copy.innerHTML = svg("copy"); copy.title = "Nusxa olish"; }, 1500);
+    }
+  });
+
+  const moreWrap = document.createElement("div");
+  moreWrap.className = "act-more-wrap";
+  const more = btn("more", "Boshqa amallar");
+  const menu = document.createElement("div");
+  menu.className = "act-menu";
+  menu.hidden = true;
+  menu.innerHTML =
+    ("speechSynthesis" in window ? `<button type="button" data-act="speak">🔊 Ovoz chiqarib o'qish</button>` : "") +
+    `<button type="button" data-act="share">↗ Ulashish</button>`;
+  moreWrap.append(more, menu);
+  bar.appendChild(moreWrap);
+  more.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = menu.hidden;
+    document.querySelectorAll(".act-menu:not([hidden])").forEach((m) => (m.hidden = true));
+    menu.hidden = !open;
+  });
+  menu.addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-act]");
+    if (!b) return;
+    if (b.dataset.act === "speak") toggleSpeak(msg, b);
+    if (b.dataset.act === "share") {
+      menu.hidden = true;
+      const text = plainTextOf(msg);
+      try {
+        if (navigator.share) await navigator.share({ title: "Gamma AI", text });
+        else if (await copyText(text)) b.textContent = "✓ Nusxa olindi";
+      } catch {}
+    }
+  });
+  return bar;
+}
+
+// Javob tugagach: amallar paneli qo'shiladi
+function finishAssistant(bubble, msg) {
+  const wrap = bubble.closest(".msg");
+  if (!wrap || msgOf.has(wrap)) return;
+  msgOf.set(wrap, msg);
+  wrap.appendChild(actionBarEl(msg));
+}
+
+// Oxirgi javobni qayta olish: savol va javob o'chiriladi, savol qaytadan yuboriladi
+function regenerate(msg) {
+  if (busy) return;
+  const c = chat;
+  const i = c.messages.indexOf(msg);
+  if (i < 1 || i !== c.messages.length - 1) return;
+  const user = c.messages[i - 1];
+  c.messages.splice(i - 1, 2);
+  save();
+  const nodes = chatEl.querySelectorAll(".msg");
+  [...nodes].slice(-2).forEach((n) => n.remove());
+  const force = msg.images ? "image" : msg.videos ? "video" : msg.deck ? "presentation" : null;
+  send(user.content, { file: user.file || null, force });
 }
 
 // ---------- Fayl biriktirish ----------
@@ -671,17 +929,52 @@ const MAX_FILE_MB = 25;
 let attachment = null; // { status: "uploading" | "ready" | "error", name, kind, text, chars, truncated, error }
 let attachController = null;
 
+// Biriktirilgan fayl: rasm/videoda kichik nusxa (Gemini'dagidek), boshqa fayllarda nomli plitka
 function renderAttach() {
   attachBar.innerHTML = "";
   attachBar.hidden = !attachment;
   if (attachment) {
-    attachBar.appendChild(fileChipEl(attachment, { status: attachment.status, onRemove: clearAttachment }));
+    const a = attachment;
+    const tile = document.createElement("div");
+    tile.className = `att-tile ${a.preview || a.thumb ? "media" : "doc"} ${a.status}`;
+    tile.title = a.status === "error" ? `${a.name}: ${a.error}` : a.name;
+    if (a.preview || a.thumb) {
+      const img = document.createElement("img");
+      img.src = a.preview || a.thumb;
+      img.alt = a.name;
+      tile.appendChild(img);
+      if (a.kind === "video") tile.insertAdjacentHTML("beforeend", '<span class="att-badge">▶</span>');
+    } else {
+      tile.insertAdjacentHTML("beforeend", `<span class="att-ico">${KIND_ICON[a.kind] || "📄"}</span><span class="att-text"><b></b><small></small></span>`);
+      tile.querySelector("b").textContent = a.name;
+      tile.querySelector("small").textContent =
+        a.status === "uploading" ? KIND_LOADING[a.kind] || "o'qilmoqda…"
+        : a.status === "error" ? "xatolik"
+        : KIND_DONE[a.kind] || formatChars(a.chars || a.text.length) + (a.truncated ? " (qisqartirildi)" : "");
+    }
+    if (a.status === "uploading") tile.insertAdjacentHTML("beforeend", '<span class="att-spin" aria-label="Yuklanmoqda"></span>');
+    if (a.status === "error") tile.insertAdjacentHTML("beforeend", '<span class="att-err" aria-hidden="true">!</span>');
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "att-x";
+    x.textContent = "✕";
+    x.setAttribute("aria-label", "Faylni olib tashlash");
+    x.addEventListener("click", clearAttachment);
+    tile.appendChild(x);
+    attachBar.appendChild(tile);
+    if (a.status === "error") {
+      const msg = document.createElement("p");
+      msg.className = "att-error";
+      msg.textContent = a.error;
+      attachBar.appendChild(msg);
+    }
   }
   updateSendBtn();
 }
 function clearAttachment() {
   attachController?.abort();
   attachController = null;
+  if (attachment?.preview) URL.revokeObjectURL(attachment.preview);
   attachment = null;
   fileInput.value = "";
   renderAttach();
@@ -705,6 +998,23 @@ async function shrinkImage(file) {
   ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
   const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.85));
   return blob ? { blob, name: file.name.replace(/\.[^.]+$/, "") + ".jpg" } : { blob: file, name: file.name };
+}
+
+async function makeThumb(source, w, h) {
+  const scale = Math.min(1, 240 / Math.max(w, h));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(w * scale));
+  c.height = Math.max(1, Math.round(h * scale));
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(source, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", 0.72);
+}
+async function imageThumb(file) {
+  if (typeof createImageBitmap !== "function") return null;
+  const bmp = await createImageBitmap(file);
+  return makeThumb(bmp, bmp.width, bmp.height);
 }
 
 async function uploadBlob(blob, name, signal, purpose = "") {
@@ -752,10 +1062,12 @@ async function videoContactSheet(file) {
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    let thumb = null;
     for (let i = 0; i < n; i++) {
       const t = Math.min(duration - 0.05, ((i + 0.5) / n) * duration);
       video.currentTime = t;
       await once("seeked");
+      if (i === 0) thumb = await makeThumb(video, video.videoWidth, video.videoHeight).catch(() => null);
       const x = (i % cols) * cellW, y = Math.floor(i / cols) * h;
       ctx.drawImage(video, x, y, cellW, h);
       ctx.fillStyle = "rgba(0,0,0,.65)";
@@ -766,7 +1078,7 @@ async function videoContactSheet(file) {
     }
     const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.82));
     if (!blob) throw new Error("canvas");
-    return { blob, duration };
+    return { blob, duration, thumb };
   } finally {
     URL.revokeObjectURL(url);
     video.removeAttribute("src");
@@ -777,11 +1089,12 @@ async function videoContactSheet(file) {
 const TRANSCRIBABLE = /\.(mp3|wav|m4a|ogg|oga|opus|flac|mpga|mpeg|mp4|webm)$/i;
 
 // Video: kadrlar tavsifi (vision) + ovozdagi nutq (Whisper) parallel o'qiladi va bitta matnga birlashtiriladi
-async function readVideo(file, name, signal) {
+async function readVideo(file, name, signal, onThumb) {
   const canSpeech = TRANSCRIBABLE.test(name) && file.size <= MAX_FILE_MB * 1024 * 1024;
   const [frames, speech] = await Promise.allSettled([
-    videoContactSheet(file).then(async ({ blob, duration }) => ({
+    videoContactSheet(file).then(async ({ blob, duration, thumb }) => ({
       duration,
+      thumb: thumb && (onThumb?.(thumb), thumb),
       text: (await uploadBlob(blob, name.replace(/\.[^.]+$/, "") + "-kadrlar.jpg", signal, "video-frames")).text,
     })),
     canSpeech ? uploadBlob(file, name, signal, "video-audio").then((d) => d.text) : Promise.reject(new Error("skip")),
@@ -822,25 +1135,36 @@ async function attachFile(file) {
     attachment = { status: "error", name, kind, error: `juda katta (${MAX_FILE_MB} MB dan oshmasin)` };
     return renderAttach();
   }
+  if (attachment?.preview) URL.revokeObjectURL(attachment.preview);
   const ctrl = (attachController = new AbortController());
-  attachment = { status: "uploading", name, kind };
+  // Rasm darhol ko'rinadi, ustida yuklanish belgisi aylanadi
+  const preview = isImage ? URL.createObjectURL(file) : null;
+  attachment = { status: "uploading", name, kind, preview };
   renderAttach();
+  let thumb = null;
   try {
     let text, chars, truncated = false;
     if (isVideo) {
-      text = await readVideo(file, name, ctrl.signal);
+      text = await readVideo(file, name, ctrl.signal, (t) => {
+        thumb = t;
+        if (ctrl === attachController && attachment) {
+          attachment.thumb = t;
+          renderAttach();
+        }
+      });
       chars = text.length;
     } else {
+      if (isImage) thumb = await imageThumb(file).catch(() => null);
       const { blob, name: uploadName } = isImage ? await shrinkImage(file).catch(() => ({ blob: file, name })) : { blob: file, name };
       const data = await uploadBlob(blob, uploadName || name, ctrl.signal);
       ({ text, truncated } = data);
       chars = Number(data.chars) || text.length;
     }
     if (ctrl !== attachController) return;
-    attachment = { status: "ready", name, kind, text, chars, truncated: !!truncated };
+    attachment = { status: "ready", name, kind, text, chars, truncated: !!truncated, preview, thumb };
   } catch (err) {
     if (err.name === "AbortError" || ctrl !== attachController) return;
-    attachment = { status: "error", name, kind, error: err.message || "Tarmoq xatosi." };
+    attachment = { status: "error", name, kind, preview, thumb, error: err.message || "Tarmoq xatosi." };
   }
   attachController = null;
   renderAttach();
@@ -878,11 +1202,12 @@ appEl.addEventListener("drop", (e) => {
 // Biriktirilgan faylni yuborishga oladi (tayyor bo'lsa) va panelni tozalaydi
 function takeAttachment() {
   if (attachment?.status !== "ready") return null;
-  const { name, kind, text, chars, truncated } = attachment;
+  const { name, kind, text, chars, truncated, thumb, preview } = attachment;
+  if (preview) URL.revokeObjectURL(preview);
   attachment = null;
   fileInput.value = "";
   renderAttach();
-  return { name, kind, text, chars, truncated };
+  return { name, kind, text, chars, truncated, ...(thumb ? { thumb } : {}) };
 }
 
 // Serverga faqat oxirgi biriktirilgan faylning matnini yuboramiz (model faqat shuni o'qiydi), qolganlarining nomi yetarli
@@ -955,6 +1280,7 @@ async function sendPresentation(text, { file = null, source = null, topic = null
     c.updatedAt = Date.now();
     save();
     renderDeckMessage(bubble, msg, true); // fayl avtomatik yuklanadi; kartochkadagi tugma bilan qayta yuklash mumkin
+    finishAssistant(bubble, msg);
   } else {
     bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Taqdimotni tuzib bo'lmadi.")}</p>`;
     dropUnanswered(c);
@@ -964,15 +1290,26 @@ async function sendPresentation(text, { file = null, source = null, topic = null
 }
 
 // ---------- Yuborish ----------
-async function send(text) {
+// opts.file — qayta javob olishda avvalgi fayl (biriktirish panelidagi fayl o'rniga);
+// opts.force — avvalgi javob turi ("image" | "video" | "presentation")
+async function send(text, opts = {}) {
   text = text.trim();
-  if (busy || attachment?.status === "uploading") return;
-  const file = attachment?.status === "ready" ? attachment : null;
+  const reuse = "file" in opts;
+  if (busy || (!reuse && attachment?.status === "uploading")) return;
+  const file = reuse ? opts.file : attachment?.status === "ready" ? attachment : null;
+  const take = () => (reuse ? opts.file : takeAttachment());
   if (!text && !file) return;
   if (!text) text = DEFAULT_ASK[file.kind] || DEFAULT_ASK.document;
-  if (wantsPresentation(text)) return sendPresentation(text, { file: takeAttachment() });
-  if (!file && imagesAvailable && (imageMode || wantsImage(text))) return sendImage(text);
-  takeAttachment();
+  if (opts.force === "presentation" || (!opts.force && wantsPresentation(text))) return sendPresentation(text, { file: take() });
+  if (!file) {
+    if (opts.force === "video" || (!opts.force && videosAvailable && (searchMode === "video" || (!searchMode && wantsVideo(text))))) {
+      return sendMediaSearch(text, "video");
+    }
+    if (opts.force === "image" || (!opts.force && imagesAvailable && (searchMode === "image" || (!searchMode && wantsImage(text))))) {
+      return sendMediaSearch(text, "image");
+    }
+  }
+  take();
   const wantsWord = wantsDocument(text);
   busy = true;
   updateSendBtn();
@@ -981,7 +1318,9 @@ async function send(text) {
 
   // Shu suhbatni eslab qolamiz: javob kelguncha boshqa suhbatga o'tilsa, javob u yerga tushmasin
   const c = chat;
-  const fileData = file ? { name: file.name, kind: file.kind, text: file.text, chars: file.chars, truncated: file.truncated } : null;
+  const fileData = file
+    ? { name: file.name, kind: file.kind, text: file.text, chars: file.chars, truncated: file.truncated, ...(file.thumb ? { thumb: file.thumb } : {}) }
+    : null;
   pushUserMessage(c, text, fileData);
   addMessageEl("user", text, null, fileData ? { file: fileData } : null);
   const bubble = addMessageEl("assistant", "");
@@ -1067,6 +1406,7 @@ async function send(text) {
     c.messages.push(msg);
     c.updatedAt = Date.now();
     save();
+    finishAssistant(bubble, msg);
   } else {
     bubble.innerHTML = `<p class="error">${escapeHtml(errorText || "Javob olinmadi.")}</p>`;
     // Javobsiz savolni tarixdan olib tashlaymiz, shunda qayta yuborish mumkin
@@ -1133,10 +1473,13 @@ $("themeBtn").addEventListener("click", () => {
   // Avval sarlavhasi olinmay qolgan suhbatlar uchun qayta so'raymiz
   store.chats.filter((c) => c.titlePending).slice(0, 3).forEach(requestTitle);
   try {
-    imagesAvailable = !!(await (await fetch("/api/features")).json()).images;
+    const f = await (await fetch("/api/features")).json();
+    imagesAvailable = !!f.images;
+    videosAvailable = !!f.videos;
   } catch {
-    imagesAvailable = false;
+    imagesAvailable = videosAvailable = false;
   }
   searchItem.hidden = !imagesAvailable;
-  if (!imagesAvailable) setImageMode(false);
+  videoSearchItem.hidden = !videosAvailable;
+  setSearchMode(null);
 })();

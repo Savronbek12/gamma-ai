@@ -60,8 +60,10 @@
         </div>
       </section>
 
-      <div class="attach-bar" id="attachBar" hidden></div>
       <form class="composer" id="composer">
+        <div class="attach-bar" id="attachBar" hidden></div>
+        <textarea id="input" rows="1" placeholder="Savolingizni yozing…" aria-label="Savol" maxlength="8000"></textarea>
+        <div class="composer-tools">
         <div class="plus-wrap">
           <button type="button" id="plusBtn" class="plus-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="plusMenu"
             aria-label="Qo'shish: rasm, video, audio yoki fayl" title="Rasm, video, audio yoki fayl qo'shish">
@@ -71,12 +73,14 @@
             <button type="button" role="menuitem" data-pick="video"><span class="pm-ico">🎬</span><span><b>Video</b><small>MP4, WEBM, MOV — kadrlar va nutq</small></span></button>
             <button type="button" role="menuitem" data-pick="audio"><span class="pm-ico">🎵</span><span><b>Audio</b><small>MP3, WAV, M4A, OGG — nutq matnga</small></span></button>
             <button type="button" role="menuitem" data-pick="file"><span class="pm-ico">📄</span><span><b>Hujjat yoki fayl</b><small>PDF, Word, PowerPoint, Excel, matn</small></span></button>
-            <button type="button" role="menuitem" data-pick="search" id="searchItem" hidden><span class="pm-ico">🔎</span><span><b>Internetdan rasm qidirish</b><small>Wikimedia, Openverse</small></span></button>
+            <button type="button" role="menuitem" data-pick="search" id="searchItem" hidden><span class="pm-ico">🔎</span><span><b>Internetdan rasm qidirish</b><small>Openverse, Flickr, Wikimedia — yuklab olish bilan</small></span></button>
+            <button type="button" role="menuitem" data-pick="video-search" id="videoSearchItem" hidden><span class="pm-ico">🎞</span><span><b>Internetdan video qidirish</b><small>Internet Archive, Wikimedia — yuklab olish bilan</small></span></button>
           </div>
         </div>
         <input type="file" id="fileInput" hidden>
-        <textarea id="input" rows="1" placeholder="Savolingizni yozing…" aria-label="Savol" maxlength="8000"></textarea>
-        <button type="submit" id="sendBtn" aria-label="Yuborish">➤</button>
+        <span class="tools-spacer"></span>
+        <button type="submit" id="sendBtn" aria-label="Yuborish"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5m0 0l-6 6m6-6l6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
       </form>
       <p class="disclaimer">Gamma AI xato qilishi mumkin. Muhim ma'lumotlarni tekshirib ko'ring.</p>
     </main>

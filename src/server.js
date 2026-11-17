@@ -1,6 +1,7 @@
 import express from "express";
 import path from "node:path";
 import crypto from "node:crypto";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { SUBJECTS } from "./subjects.js";
 import { wikipediaContext, wikipediaInstruction } from "./wikipedia.js";
@@ -10,6 +11,7 @@ import { fileToText, extOf, IMAGE_TYPES } from "./fileparse.js";
 import { ocrImage } from "./ocr.js";
 import { buildPptx, buildDocx, normalizeDeck, safeFileName } from "./export.js";
 import { findDeckImages } from "./slideimages.js";
+import { searchVideos } from "./videosearch.js";
 
 const MAX_RATE_WAIT_MS = 45_000; // daqiqalik limitda foydalanuvchini ko'pi bilan shuncha kuttiramiz
 const sleep = (ms, signal) =>
@@ -662,15 +664,15 @@ app.post("/api/title", async (req, res) => {
 // ---------------------------------------------------------------------------
 // Rasm qidirish: ochiq internetdan (Wikimedia Commons, Openverse)
 // ---------------------------------------------------------------------------
-app.get("/api/features", (_req, res) => res.json({ images: true }));
+app.get("/api/features", (_req, res) => res.json({ images: true, videos: true }));
 
 // AI ishlamasa: so'rovdan "rasmini topib bering" kabi so'zlarni olib tashlab, qolganini qidiramiz
 const IMAGE_REQUEST_STEMS =
-  /^(rasm|surat|tasvir|foto|illyustratsiya|картинк|фото|изображени|рисун|найди|покажи|нарисуй|picture|image|photo)/i;
+  /^((rasm|surat|tasvir|foto|fotosurat|illyustratsiya|video|videolavha|videorolik|rolik|lavha)(i|ni|ini|si|sini|lar|lari|larini|larni)?|(картинк|фото|изображени|рисун|видео|ролик)\p{L}{0,3}|найди\p{L}*|покажи\p{L}*|нарисуй\p{L}*|(picture|image|photo|video|clip)s?)$/iu;
 const IMAGE_REQUEST_VERBS =
   /^(top|ko['ʻ’`]?rsat|ber|chiz|izla|qidir|yubor|chiqar)(ib|ing|ish|sang|asiz|ing|gin|chi|ingiz|sangiz|ilsin)*$/i;
 const IMAGE_FILLER = new Set(
-  "iltimos menga bizga bir nechta va find show draw get please me some a an the of for".split(" "),
+  "iltimos menga bizga bir nechta va haqida haqidagi bo'yicha boʻyicha uchun про о об find show draw get please me some a an the of for about".split(" "),
 );
 const fallbackImageQuery = (text) =>
   text
@@ -704,11 +706,103 @@ app.post("/api/image-search", async (req, res) => {
     if (!images.length) {
       return res.status(404).json({ error: "Afsuski, so'ralgan rasm ochiq manbalarda topilmadi. Boshqacharoq ifodalab ko'ring." });
     }
-    res.json({ query: english || local, images });
+    res.json({
+      query: english || local,
+      images: images.map((x) => ({ ...x, download: signMedia(x.full || x.thumb, x.title) })),
+    });
   } catch (err) {
     if (abort.signal.aborted) return;
     console.error("Rasm qidiruvi xatosi:", err?.status, err?.message);
     res.status(502).json({ error: "Rasm qidirishda xatolik yuz berdi. Iltimos, birozdan so'ng qayta urinib ko'ring." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Video qidirish: ochiq internetdan (Wikimedia Commons, Internet Archive)
+// ---------------------------------------------------------------------------
+const videoHits = new Map();
+app.post("/api/video-search", async (req, res) => {
+  if (rateLimited(req.ip, videoHits, IMAGE_RATE_LIMIT_MAX)) {
+    return res.status(429).json({ error: "Video so'rovlari juda ko'p. Iltimos, bir daqiqadan so'ng qayta urinib ko'ring." });
+  }
+  const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
+  if (!prompt) return res.status(400).json({ error: "Qanday video kerakligini yozing." });
+  if (prompt.length > 1000) return res.status(400).json({ error: "So'rov juda uzun (1 000 belgidan oshmasin)." });
+
+  const abort = new AbortController();
+  res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+  try {
+    const english = await imageSearchQuery(prompt, abort.signal).catch(() => null);
+    if (abort.signal.aborted) return;
+    const local = fallbackImageQuery(prompt);
+    const videos = await searchVideos({ english, local }, { signal: abort.signal });
+    if (abort.signal.aborted) return;
+    if (!videos.length) {
+      return res.status(404).json({ error: "Afsuski, so'ralgan video ochiq manbalarda topilmadi. Boshqacharoq (masalan, inglizcha) ifodalab ko'ring." });
+    }
+    res.json({
+      query: english || local,
+      videos: videos.map((v) => ({ ...v, download: signMedia(v.full, `${v.title}.${v.ext || "mp4"}`) })),
+    });
+  } catch (err) {
+    if (abort.signal.aborted) return;
+    console.error("Video qidiruvi xatosi:", err?.status, err?.message);
+    res.status(502).json({ error: "Video qidirishda xatolik yuz berdi. Iltimos, birozdan so'ng qayta urinib ko'ring." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Topilgan rasm/videoni yuklab olish. Server faqat o'zi imzolagan havolalarni uzatadi
+// (ochiq proksi bo'lib qolmasligi uchun) va faylni "attachment" sifatida beradi —
+// shunda u brauzerda ham, Android ilovada ham yuklab olinadi.
+// ---------------------------------------------------------------------------
+// Kalit server qayta ishga tushganda ham o'zgarmasin (aks holda eski suhbatlardagi havolalar ishlamay qoladi):
+// MEDIA_SECRET bo'lmasa, mavjud maxfiy API kalitidan bir tomonlama hosila olinadi
+const MEDIA_SECRET =
+  process.env.MEDIA_SECRET ||
+  crypto
+    .createHash("sha256")
+    .update(`gamma-ai-media:${process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY || crypto.randomBytes(32).toString("hex")}`)
+    .digest("hex");
+const mediaSig = (u, n) => crypto.createHmac("sha256", MEDIA_SECRET).update(`${u}\n${n}`).digest("hex").slice(0, 32);
+function signMedia(url, title) {
+  if (!/^https:\/\//i.test(String(url || ""))) return null;
+  const ext = (/\.([a-z0-9]{2,5})(?:$|\?)/i.exec(new URL(url).pathname)?.[1] || "jpg").toLowerCase();
+  const base = String(title || "gamma-ai").replace(/\.[a-z0-9]{2,5}$/i, "");
+  const name = safeFileName(base, ext);
+  return `/api/media?u=${encodeURIComponent(url)}&n=${encodeURIComponent(name)}&s=${mediaSig(url, name)}`;
+}
+
+app.get("/api/media", async (req, res) => {
+  const u = String(req.query.u || "");
+  const n = String(req.query.n || "gamma-ai");
+  const s = String(req.query.s || "");
+  if (!/^https:\/\//i.test(u) || s.length !== 32 || !crypto.timingSafeEqual(Buffer.from(s), Buffer.from(mediaSig(u, n)))) {
+    return res.status(403).type("text/plain; charset=utf-8").send("Havola eskirgan. Saytda qidiruvni qaytadan bajaring.");
+  }
+  const abort = new AbortController();
+  res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+  try {
+    const upstream = await fetch(u, {
+      headers: { "User-Agent": "GammaAI/1.0 (https://gamma-ai.uz)" },
+      redirect: "follow",
+      signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]),
+    });
+    if (!upstream.ok || !upstream.body) return res.status(502).type("text/plain; charset=utf-8").send("Faylni manbadan olib bo'lmadi.");
+    const size = Number(upstream.headers.get("content-length") || 0);
+    if (size > 600 * 1024 * 1024) return res.status(413).type("text/plain; charset=utf-8").send("Fayl juda katta.");
+    const ascii = n.replace(/[^A-Za-z0-9 ._-]+/g, "_").replace(/_+/g, "_") || "gamma-ai";
+    res.set({
+      "Content-Type": upstream.headers.get("content-type") || "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(n)}`,
+      "Cache-Control": "no-store",
+      ...(size ? { "Content-Length": String(size) } : {}),
+    });
+    Readable.fromWeb(upstream.body).on("error", () => res.destroy()).pipe(res);
+  } catch (err) {
+    if (abort.signal.aborted) return;
+    console.warn("Media yuklash xatosi:", err?.message);
+    if (!res.headersSent) res.status(502).type("text/plain; charset=utf-8").send("Faylni yuklab bo'lmadi.");
   }
 });
 

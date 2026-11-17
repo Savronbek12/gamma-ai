@@ -5,7 +5,7 @@
 
 const USER_AGENT = "GammaAI/1.0 (https://gamma-ai.uz)"; // Wikimedia talabi: tanib bo'ladigan User-Agent
 const TIMEOUT_MS = 8000;
-const MAX_RESULTS = 6;
+const MAX_RESULTS = 9;
 
 const stripHtml = (s) => String(s || "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
 
@@ -40,6 +40,7 @@ function fromCommonsPage(p, source = "Wikimedia Commons") {
   const meta = info.extmetadata || {};
   return {
     thumb: info.thumburl,
+    full: info.url.split("?")[0],
     page: info.descriptionurl,
     title: stripHtml(meta.ObjectName?.value) || p.title.replace(/^File:/, "").replace(/\.[a-z0-9]+$/i, ""),
     creator: stripHtml(meta.Artist?.value).slice(0, 80) || null,
@@ -87,6 +88,7 @@ async function searchOpenverse(query, signal) {
     .filter((r) => r.thumbnail && r.foreign_landing_url)
     .map((r) => ({
       thumb: r.thumbnail,
+      full: r.url || r.thumbnail,
       page: r.foreign_landing_url,
       title: stripHtml(r.title) || query,
       creator: stripHtml(r.creator).slice(0, 80) || null,
