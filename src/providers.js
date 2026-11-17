@@ -298,14 +298,30 @@ export async function transcribeAudio(buf, name, signal) {
 export async function describeImage(buf, mime, signal, { videoFrames = false } = {}) {
   const system = VISION_SYSTEM + (videoFrames ? VIDEO_FRAMES_NOTE : "");
   const dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
-  if (PROVIDER === "gemini") {
+  const viaGemini = async () => {
     gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const r = await gemini.models.generateContent({
-      model: process.env.VISION_MODEL || MODEL,
+      model: process.env.GEMINI_VISION_MODEL || (PROVIDER === "gemini" ? process.env.VISION_MODEL || MODEL : DEFAULT_MODELS.gemini),
       contents: [{ role: "user", parts: [{ inlineData: { mimeType: mime, data: buf.toString("base64") } }, { text: "Rasmni o'qing." }] }],
       config: { systemInstruction: system, abortSignal: signal },
     });
     return r.text;
+  };
+  if (PROVIDER === "gemini") return viaGemini();
+  // Groq'da vision modeli yo'qligi aniqlangan bo'lsa (1 soatga eslab qolinadi) — darhol Gemini'ga (kaliti bo'lsa)
+  if (PROVIDER === "groq" && Date.now() < groqVisionDownUntil) {
+    if (process.env.GEMINI_API_KEY) return viaGemini();
+    throw Object.assign(new Error("Groq'da rasm o'qiydigan model yo'q"), { code: "NO_VISION" });
+  }
+  if (PROVIDER === "groq") {
+    try {
+      return await describeWithGroq(dataUrl, system, signal);
+    } catch (err) {
+      if (signal?.aborted || err?.status === 429) throw err;
+      if (err?.status === 404 || err?.status === 400 || err?.code === "NO_VISION") groqVisionDownUntil = Date.now() + 60 * 60_000;
+      if (process.env.GEMINI_API_KEY) return viaGemini();
+      throw Object.assign(err, { code: "NO_VISION" });
+    }
   }
   if (PROVIDER === "claude") {
     claude ??= new Anthropic();
@@ -320,6 +336,11 @@ export async function describeImage(buf, mime, signal, { videoFrames = false } =
     );
     return r.content.find((b) => b.type === "text")?.text;
   }
+  return null;
+}
+
+let groqVisionDownUntil = 0;
+async function describeWithGroq(dataUrl, system, signal) {
   groq ??= new Groq({ maxRetries: 0, timeout: 90_000 });
   const models = await groqVisionModels();
   let lastErr = null;

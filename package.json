@@ -21,6 +21,7 @@
     "mammoth": "^1.13.0",
     "marked": "^18.2.0",
     "pptxgenjs": "^4.0.1",
+    "tesseract.js": "^7.0.0",
     "unpdf": "^2.2.1"
   }
 }

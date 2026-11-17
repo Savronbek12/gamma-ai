@@ -7,6 +7,7 @@ import { wikipediaContext, wikipediaInstruction } from "./wikipedia.js";
 import { searchImages } from "./imagesearch.js";
 import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs, generateTitle, imageSearchQuery, describeImage, completeJSON, transcribeAudio, canTranscribe } from "./providers.js";
 import { fileToText, extOf, IMAGE_TYPES } from "./fileparse.js";
+import { ocrImage } from "./ocr.js";
 import { buildPptx, buildDocx, normalizeDeck, safeFileName } from "./export.js";
 import { findDeckImages } from "./slideimages.js";
 
@@ -406,10 +407,31 @@ app.post(
           return res.status(413).json({ error: `Rasm juda katta (${MAX_IMAGE_MB} MB dan oshmasin).` });
         }
         const videoFrames = purpose === "video-frames";
-        const description = await describeImage(buf, IMAGE_TYPES[ext], abort.signal, { videoFrames });
+        let description = null;
+        try {
+          description = await describeImage(buf, IMAGE_TYPES[ext], abort.signal, { videoFrames });
+        } catch (err) {
+          if (abort.signal.aborted || err?.status === 429 || err?.code !== "NO_VISION") throw err;
+          console.warn("Vision modeli yo'q, OCR ishlatiladi:", err?.message);
+        }
         if (abort.signal.aborted) return;
-        if (!description?.trim()) return res.status(422).json({ error: "Rasmni o'qib bo'lmadi. Boshqa rasm yuborib ko'ring." });
-        text = videoFrames ? description.trim() : `[Bu rasm — uning tarkibi so'z bilan ifodalangan]\n${description.trim()}`;
+        if (description?.trim()) {
+          text = videoFrames ? description.trim() : `[Bu rasm — uning tarkibi so'z bilan ifodalangan]\n${description.trim()}`;
+        } else {
+          // Zaxira: rasmdagi matnni OCR bilan o'qiymiz (daftar, kitob, test varag'i suratlari uchun yetarli)
+          const ocr = await ocrImage(buf);
+          if (abort.signal.aborted) return;
+          if (!ocr) {
+            return res.status(422).json({
+              error: videoFrames
+                ? "Video kadrlarini o'qib bo'lmadi."
+                : "Rasmda o'qiladigan matn topilmadi. Hozircha rasmlardan faqat matn (kitob, daftar, test varag'i) o'qiladi.",
+            });
+          }
+          text = videoFrames
+            ? `Video kadrlaridagi yozuvlar (OCR):\n${ocr}`
+            : `[Rasmdan OCR orqali o'qilgan matn — rasmning o'zi tasvirlanmagan; ba'zi so'zlar noto'g'ri tanilgan bo'lishi mumkin]\n${ocr}`;
+        }
       } else if (TRANSCRIBE_EXT.has(ext)) {
         kind = purpose === "video-audio" || VIDEO_EXT.has(ext) ? "video" : "audio";
         if (!canTranscribe()) return res.status(501).json({ error: "Audio/video nutqini o'qish hozircha sozlanmagan." });
