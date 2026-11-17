@@ -10,6 +10,9 @@ export const PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
 
 const DEFAULT_MODELS = { groq: "openai/gpt-oss-120b", gemini: "gemini-3.8-flash", claude: "claude-opus-5-5" };
 export const MODEL = process.env.GAMMA_MODEL || DEFAULT_MODELS[PROVIDER];
+const CHAT_TEMPERATURE = Number.isFinite(Number(process.env.CHAT_TEMPERATURE)) && process.env.CHAT_TEMPERATURE !== ""
+  ? Number(process.env.CHAT_TEMPERATURE)
+  : 0.3;
 
 if (!DEFAULT_MODELS[PROVIDER]) {
   throw new Error(`Noma'lum AI_PROVIDER: "${PROVIDER}". "groq", "gemini" yoki "claude" bo'lishi kerak.`);
@@ -95,6 +98,8 @@ async function streamGroq({ systemParts, messages, signal, onText, maxTokens, re
       // egallab, javob bo'sh yoki chala qolardi. "medium" — aniqlik va javob uzunligi o'rtasidagi muvozanat.
       reasoning_effort: reasoningEffort || process.env.REASONING_EFFORT || "medium",
       reasoning_format: "hidden", // fikrlash jarayoni foydalanuvchiga ko'rsatilmaydi
+      // Past harorat — model "ijod" qilmaydi, eng ehtimolli (aniq) javobni tanlaydi: to'qib chiqarish kamayadi
+      temperature: CHAT_TEMPERATURE,
       messages: [
         { role: "system", content: systemParts.join("\n\n") },
         ...messages.map((m) => ({ role: m.role, content: m.content })),
@@ -123,6 +128,7 @@ async function streamGemini({ systemParts, messages, signal, onText }) {
     config: {
       systemInstruction: systemParts.join("\n\n"),
       maxOutputTokens: 16000,
+      temperature: CHAT_TEMPERATURE,
       abortSignal: signal,
     },
   });
