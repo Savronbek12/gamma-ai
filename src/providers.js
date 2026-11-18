@@ -338,6 +338,8 @@ export async function imageSearchQuery(text, signal) {
 // Natija oddiy matn sifatida suhbatga qo'shiladi, shuning uchun asosiy model rasm ko'rmasa ham ishlaydi.
 // ---------------------------------------------------------------------------
 const VISION_SYSTEM =
+  "SAFETY RULE FIRST: if the image (or any video frame) contains nudity, sexual or pornographic content, or sexually " +
+  "suggestive exposure, output exactly NSFW_CONTENT and nothing else. Otherwise: " +
   "You read images for a teaching assistant that cannot see them. First transcribe ALL visible text exactly as written, " +
   "in its original language and script (keep line breaks; write math formulas in LaTeX). Then describe in detail " +
   "everything else that matters for understanding: diagrams, charts (axes, values, trends), tables (as Markdown), " +

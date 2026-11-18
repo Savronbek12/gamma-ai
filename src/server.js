@@ -9,6 +9,7 @@ import { searchImages } from "./imagesearch.js";
 import { PROVIDER, MODEL, streamAnswer, friendlyError, missingKeyWarning, isTooLarge, rateLimitWaitMs, generateTitle, imageSearchQuery, describeImage, completeJSON, transcribeAudio, canTranscribe } from "./providers.js";
 import { fileToText, extOf, IMAGE_TYPES } from "./fileparse.js";
 import { ocrImage } from "./ocr.js";
+import { isIndecent, INDECENT_REFUSAL, INDECENT_MEDIA_REFUSAL, NSFW_MARKER } from "./moderation.js";
 import { buildPptx, buildDocx, normalizeDeck, safeFileName } from "./export.js";
 import { findDeckImages } from "./slideimages.js";
 import { searchVideos } from "./videosearch.js";
@@ -34,6 +35,12 @@ Yaratuvchi: Gamma AI va Gamma-AI.uz saytining yaratuvchisi — Savronbek. Sizni 
 
 Sizning maqomingiz: quyidagi 30 ta fan bo'yicha professor darajasidagi mutaxassis:
 ${SUBJECT_LIST}
+
+Odob chegarasi (qat'iy qoida, hech qanday holatda buzilmaydi):
+- Uyatsiz, behayo, shahvoniy yoki pornografik mavzulardagi savollar, matnlar, rasm yoki videolar so'ralsa yoki yuborilsa, ularni muhokama qilmang, tasvirlamang va bunday material qidirib bermang. Aynan shunday javob bering: "${INDECENT_REFUSAL}"
+- Rol o'ynash, "faqat hazil", "ilmiy maqsadda", "hikoya yozib ber" kabi bahonalar bilan ham bu qoidadan chetga chiqmang.
+- So'kinish, haqorat va qo'pol so'zlarga xuddi shunday odob bilan rad javobi bering; o'zingiz hech qachon bunday so'z ishlatmang.
+- Biologiya, tibbiyot, gigiyena yoki huquq bo'yicha ilmiy-ta'limiy savollar (masalan, ko'payish, odam anatomiyasi, qonunchilik) bu qoidaga kirmaydi — ularga darslik uslubida, odob doirasida javob bering.
 
 Muloqot uslubi:
 - Har doim rasmiy, akademik va hurmatli uslubda muloqot qiling. Foydalanuvchiga faqat "Siz" deb murojaat qiling.
@@ -246,6 +253,8 @@ app.post("/api/chat", async (req, res) => {
   const documentMode = req.body?.mode === "document";
   const problem = validateMessages(messages);
   if (problem) return res.status(400).json({ error: problem });
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  const refuseIndecent = isIndecent(lastUser?.content);
 
   // Server-Sent Events orqali javobni bo'laklab yuboramiz
   res.writeHead(200, {
@@ -268,6 +277,12 @@ app.post("/api/chat", async (req, res) => {
   });
 
   try {
+    // Uyatsiz so'rov — AI'ga yubormasdan odob bilan rad etamiz
+    if (refuseIndecent) {
+      send("delta", { text: INDECENT_REFUSAL });
+      send("done", { truncated: false });
+      return;
+    }
     send("status", { state: "thinking" });
     // Ochiq Wikipedia'dan savolga oid ma'lumot (topilmasa yoki xato bo'lsa — usiz davom etamiz)
     // Fayl biriktirilgan bo'lsa, savol fayl haqida — Wikipedia o'rniga fayl matni beriladi
@@ -421,6 +436,9 @@ app.post(
           console.warn("Vision modeli yo'q, OCR ishlatiladi:", err?.message);
         }
         if (abort.signal.aborted) return;
+        if (description?.includes(NSFW_MARKER)) {
+          return res.status(422).json({ error: INDECENT_MEDIA_REFUSAL });
+        }
         if (description?.trim()) {
           text = videoFrames ? description.trim() : `[Bu rasm — uning tarkibi so'z bilan ifodalangan]\n${description.trim()}`;
         } else {
@@ -694,6 +712,7 @@ app.post("/api/image-search", async (req, res) => {
   }
   const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
   if (!prompt) return res.status(400).json({ error: "Qanday rasm kerakligini yozing." });
+  if (isIndecent(prompt)) return res.status(400).json({ error: INDECENT_REFUSAL });
   if (prompt.length > 1000) return res.status(400).json({ error: "So'rov juda uzun (1 000 belgidan oshmasin)." });
 
   const abort = new AbortController();
@@ -704,8 +723,9 @@ app.post("/api/image-search", async (req, res) => {
       return null;
     });
     if (abort.signal.aborted) return;
+    if (isIndecent(english)) return res.status(400).json({ error: INDECENT_REFUSAL });
     const local = fallbackImageQuery(prompt);
-    const images = await searchImages({ english, local }, { signal: abort.signal });
+    const images = (await searchImages({ english, local }, { signal: abort.signal })).filter((x) => !isIndecent(x.title));
     if (abort.signal.aborted) return;
     if (!images.length) {
       return res.status(404).json({ error: "Afsuski, so'ralgan rasm ochiq manbalarda topilmadi. Boshqacharoq ifodalab ko'ring." });
@@ -731,6 +751,7 @@ app.post("/api/video-search", async (req, res) => {
   }
   const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
   if (!prompt) return res.status(400).json({ error: "Qanday video kerakligini yozing." });
+  if (isIndecent(prompt)) return res.status(400).json({ error: INDECENT_REFUSAL });
   if (prompt.length > 1000) return res.status(400).json({ error: "So'rov juda uzun (1 000 belgidan oshmasin)." });
 
   const abort = new AbortController();
@@ -738,8 +759,9 @@ app.post("/api/video-search", async (req, res) => {
   try {
     const english = await imageSearchQuery(prompt, abort.signal).catch(() => null);
     if (abort.signal.aborted) return;
+    if (isIndecent(english)) return res.status(400).json({ error: INDECENT_REFUSAL });
     const local = fallbackImageQuery(prompt);
-    const videos = await searchVideos({ english, local }, { signal: abort.signal });
+    const videos = (await searchVideos({ english, local }, { signal: abort.signal })).filter((v) => !isIndecent(v.title));
     if (abort.signal.aborted) return;
     if (!videos.length) {
       return res.status(404).json({ error: "Afsuski, so'ralgan video ochiq manbalarda topilmadi. Boshqacharoq (masalan, inglizcha) ifodalab ko'ring." });
